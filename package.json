@@ -1,0 +1,312 @@
+{
+  "name": "antigravity-maestro",
+  "displayName": "Antigravity Maestro",
+  "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
+  "version": "0.1.7",
+  "publisher": "husamettinulutas",
+  "author": {
+    "name": "Hüsamettin Ulutaş",
+    "url": "https://github.com/husamettinulutas"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/husamettinulutas/antigravity-maestro.git"
+  },
+  "homepage": "https://github.com/husamettinulutas/antigravity-maestro#readme",
+  "bugs": {
+    "url": "https://github.com/husamettinulutas/antigravity-maestro/issues"
+  },
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "galleryBanner": {
+    "color": "#0D1117",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "antigravity",
+    "gemini",
+    "claude code",
+    "codex",
+    "copilot",
+    "language model",
+    "account manager",
+    "quota"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "type": "commonjs",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "antigravity-maestro",
+        "displayName": "Antigravity Maestro"
+      }
+    ],
+    "commands": [
+      {
+        "command": "antigravityMaestro.openAccounts",
+        "title": "Antigravity Maestro: Open Accounts Panel",
+        "icon": "$(account)"
+      },
+      {
+        "command": "antigravityMaestro.addAccount",
+        "title": "Antigravity Maestro: Add Google Account",
+        "icon": "$(add)"
+      },
+      {
+        "command": "antigravityMaestro.refreshQuotas",
+        "title": "Antigravity Maestro: Refresh Quotas",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "antigravityMaestro.switchAccount",
+        "title": "Antigravity Maestro: Switch Active Account",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "antigravityMaestro.removeAccount",
+        "title": "Antigravity Maestro: Remove Account",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "antigravityMaestro.claudeCode.apply",
+        "title": "Antigravity Maestro: Use Model in Claude Code",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "antigravityMaestro.claudeCode.restore",
+        "title": "Antigravity Maestro: Restore Claude Code Defaults (Anthropic)",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "antigravityMaestro.claudeCode.forceRestore",
+        "title": "Antigravity Maestro: Force Restore Claude Code from Backup",
+        "icon": "$(history)"
+      },
+      {
+        "command": "antigravityMaestro.copilot.setup",
+        "title": "Antigravity Maestro: Set Up Copilot Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "antigravityMaestro.copilot.restore",
+        "title": "Antigravity Maestro: Restore Copilot Chat Defaults",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "antigravityMaestro.commitMessages.apply",
+        "title": "Antigravity Maestro: Use Model for Commit Messages",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "antigravityMaestro.commitMessages.restore",
+        "title": "Antigravity Maestro: Restore Commit Messages to Copilot",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "antigravityMaestro.codex.apply",
+        "title": "Antigravity Maestro: Use Model in Codex",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "antigravityMaestro.codex.restore",
+        "title": "Antigravity Maestro: Restore Codex Defaults (OpenAI)",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "antigravityMaestro.showStatus",
+        "title": "Antigravity Maestro: Show Integration Status",
+        "icon": "$(info)"
+      },
+      {
+        "command": "antigravityMaestro.restartGateway",
+        "title": "Antigravity Maestro: Restart Local Gateway",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "antigravityMaestro.copyGatewayInfo",
+        "title": "Antigravity Maestro: Copy Local Gateway URL and Key",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "antigravityMaestro.showLogs",
+        "title": "Antigravity Maestro: Show Logs",
+        "icon": "$(output)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-maestro",
+          "title": "Antigravity Maestro",
+          "icon": "resources/activity-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-maestro": [
+        {
+          "id": "antigravity-maestro-accounts",
+          "name": "Accounts",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "antigravityMaestro.addAccount",
+          "when": "view == antigravity-maestro-accounts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "antigravityMaestro.refreshQuotas",
+          "when": "view == antigravity-maestro-accounts",
+          "group": "navigation@2"
+        },
+        {
+          "command": "antigravityMaestro.openAccounts",
+          "when": "view == antigravity-maestro-accounts",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Antigravity Maestro",
+      "properties": {
+        "antigravityMaestro.gateway.port": {
+          "type": "number",
+          "default": 8765,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Preferred port for the local gateway that Claude Code and Codex talk to. If it is busy, the next free port is used instead. The gateway only binds to 127.0.0.1."
+        },
+        "antigravityMaestro.gateway.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start the local gateway automatically when VS Code launches."
+        },
+        "antigravityMaestro.quota.autoRefreshMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "maximum": 240,
+          "description": "How often to refresh account quotas in the background. Set to 0 to disable automatic refresh."
+        },
+        "antigravityMaestro.rotation.strategy": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "round-robin",
+            "highest-quota-first"
+          ],
+          "default": "highest-quota-first",
+          "description": "How to pick an account when the active one is rate limited or out of quota.",
+          "enumDescriptions": [
+            "Never switch automatically — requests fail with the upstream error",
+            "Move to the next eligible account in order",
+            "Pick the eligible account with the most remaining quota for the requested model"
+          ]
+        },
+        "antigravityMaestro.rotation.cooldownMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "Fallback cooldown applied to an account after a rate limit, when the upstream does not report a reset time."
+        },
+        "antigravityMaestro.requestTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 10,
+          "maximum": 600,
+          "description": "Maximum time to wait for an upstream response before timing out."
+        },
+        "antigravityMaestro.upstreamProxyUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional HTTP(S) proxy URL used for all Google API traffic (e.g. http://127.0.0.1:7890). Leave empty to connect directly."
+        },
+        "antigravityMaestro.oauth.clientId": {
+          "type": "string",
+          "default": "",
+          "description": "Override the built-in Google OAuth client ID used for sign-in. Leave empty to use the default Antigravity client."
+        },
+        "antigravityMaestro.oauth.clientSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Override the built-in Google OAuth client secret. Only used together with antigravityMaestro.oauth.clientId."
+        },
+        "antigravityMaestro.claudeCode.settingsScope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project"
+          ],
+          "default": "user",
+          "description": "Where to write Claude Code environment settings: 'user' (~/.claude/settings.json) or 'project' (.claude/settings.local.json in the current workspace)."
+        },
+        "antigravityMaestro.claudeCode.smallFastModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model ID used for Claude Code background/haiku-class tasks. Leave empty to reuse the main model."
+        },
+        "antigravityMaestro.codex.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Codex config.toml. Leave empty for the default ~/.codex/config.toml."
+        },
+        "antigravityMaestro.reloadOnModelChange": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "auto",
+            "never"
+          ],
+          "default": "prompt",
+          "description": "Claude Code and Codex read their wiring once, when the window starts, so a model change only lands after a reload.",
+          "enumDescriptions": [
+            "Offer a Reload Window button after applying or restoring a model",
+            "Reload the window straight away",
+            "Say what changed and leave the reload to you"
+          ]
+        },
+        "antigravityMaestro.logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Minimum log level for the Antigravity Maestro output channel."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "compile": "tsc --noEmit",
+    "watch": "node esbuild.js --watch",
+    "test": "tsc -p tsconfig.json && node --test \"out/__tests__/*.test.js\"",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.104.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

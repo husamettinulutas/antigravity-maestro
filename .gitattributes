@@ -1,0 +1,3 @@
+# Keep the repo LF so Windows checkouts do not create whole-file diffs.
+* text=auto eol=lf
+*.png binary

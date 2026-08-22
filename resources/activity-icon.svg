@@ -1,0 +1,12 @@
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- The model, held up by nothing -->
+  <circle cx="12" cy="9.4" r="3.9" fill="currentColor" />
+  <!-- The field beneath it, pressed down only where the weight hangs -->
+  <path
+    d="M0 15.6L4 15.6C7.5 15.6 8.5 18.4 12 18.4C15.5 18.4 16.5 15.6 20 15.6L24 15.6"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    opacity="0.7"
+  />
+</svg>

@@ -1,0 +1,847 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Antigravity Maestro – Premium UI
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --gap: 14px;
+  --radius: 10px;
+  --radius-lg: 14px;
+
+  /* Accent palette */
+  --accent-h: 230;
+  --accent: hsl(var(--accent-h), 88%, 62%);
+  --accent-glow: hsla(var(--accent-h), 90%, 60%, 0.35);
+  --accent-subtle: hsla(var(--accent-h), 80%, 60%, 0.12);
+
+  /* Quota spectrum */
+  --quota-good: #34d399;
+  --quota-good-glow: rgba(52, 211, 153, 0.25);
+  --quota-warn: #fbbf24;
+  --quota-warn-glow: rgba(251, 191, 36, 0.25);
+  --quota-low: #f87171;
+  --quota-low-glow: rgba(248, 113, 113, 0.25);
+
+  /* Surface layers */
+  --surface-0: var(--vscode-editor-background);
+  --surface-1: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.06));
+  --surface-2: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.1));
+  --surface-glass: rgba(128, 128, 128, 0.05);
+  --border: var(--vscode-panel-border);
+  --border-subtle: rgba(128, 128, 128, 0.12);
+
+  /* Timing */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration: 0.25s;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--surface-0);
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-glass);
+  border: 1px solid var(--border-subtle);
+}
+
+.tab {
+  padding: 5px 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: all var(--duration) var(--ease);
+  position: relative;
+}
+
+.tab:hover {
+  color: var(--vscode-foreground);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 200px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+.btn {
+  padding: 5px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-glass);
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all var(--duration) var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.04), transparent);
+  opacity: 0;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.btn:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.btn:hover::before {
+  opacity: 1;
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 20), 80%, 55%));
+  color: #fff;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 2px 10px var(--accent-glow);
+}
+
+.btn.primary:hover {
+  box-shadow: 0 4px 16px var(--accent-glow);
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.btn.subtle {
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid var(--border-subtle);
+}
+
+.btn.subtle:hover {
+  color: var(--vscode-foreground);
+  border-color: var(--border);
+}
+
+.btn.danger {
+  color: var(--vscode-descriptionForeground);
+}
+
+.btn.danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: var(--quota-low);
+  color: var(--quota-low);
+}
+
+main {
+  padding: 16px;
+}
+
+/* ── Gateway + agent integrations ────────────────────────────────────────── */
+
+.integrations {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: var(--gap);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background: var(--border-subtle);
+}
+
+.integration-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  background: var(--surface-1);
+  transition: background var(--duration) var(--ease);
+}
+
+.integration-row:hover {
+  background: var(--surface-2);
+}
+
+.integration-name {
+  font-weight: 600;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.integration-state {
+  flex: 1;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.integration-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* What the row is doing right now, coloured the way its dot is. */
+.integration-status-label {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-glass);
+}
+
+.integration-status-label.on {
+  color: var(--quota-good);
+  border-color: var(--quota-good-glow);
+}
+
+.integration-status-label.idle {
+  color: var(--vscode-descriptionForeground);
+}
+
+.integration-status-label.off {
+  color: var(--quota-low);
+  border-color: var(--quota-low-glow);
+}
+
+/* Status dots with glow */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  background: var(--vscode-descriptionForeground);
+  flex-shrink: 0;
+  transition: all var(--duration) var(--ease);
+}
+
+.dot.on {
+  background: var(--quota-good);
+  box-shadow: 0 0 6px var(--quota-good-glow), 0 0 12px var(--quota-good-glow);
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+
+.dot.idle {
+  background: var(--quota-warn);
+  box-shadow: 0 0 4px var(--quota-warn-glow);
+}
+
+.dot.off {
+  background: var(--quota-low);
+  opacity: 0.7;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 6px var(--quota-good-glow), 0 0 12px var(--quota-good-glow); }
+  50% { box-shadow: 0 0 10px var(--quota-good-glow), 0 0 20px var(--quota-good-glow); }
+}
+
+/* ── Account cards ───────────────────────────────────────────────────────── */
+
+.account {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--gap);
+  overflow: hidden;
+  transition: all var(--duration) var(--ease);
+  background: var(--surface-0);
+}
+
+.account:hover {
+  border-color: var(--border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.account.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-subtle), 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+.account.active .account-header {
+  background: linear-gradient(135deg, var(--accent-subtle), transparent 70%);
+}
+
+.account.stale {
+  opacity: 0.7;
+}
+
+.account-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--surface-1);
+  transition: background var(--duration) var(--ease);
+  cursor: pointer;
+  user-select: none;
+}
+
+.account-header:hover {
+  background: var(--surface-2);
+}
+
+/* The whole header is the toggle, so it needs something that reads as one. */
+.chevron {
+  flex: none;
+  width: 12px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--vscode-descriptionForeground);
+  transition: color var(--duration) var(--ease);
+}
+
+.account-header:hover .chevron {
+  color: var(--vscode-foreground);
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 40), 70%, 60%));
+  flex: none;
+  border: 2px solid var(--border-subtle);
+  object-fit: cover;
+  transition: all var(--duration) var(--ease);
+}
+
+.account:hover .avatar {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.email {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* Badges with gradient highlights */
+.badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  color: var(--vscode-foreground);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--duration) var(--ease);
+}
+
+.badge.active {
+  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 20), 80%, 55%));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 6px var(--accent-glow);
+}
+
+.badge.warn {
+  background: linear-gradient(135deg, var(--quota-low), hsl(10, 80%, 60%));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 6px var(--quota-low-glow);
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { box-shadow: 0 2px 6px var(--quota-low-glow); }
+  50% { box-shadow: 0 2px 12px var(--quota-low-glow); }
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.error-note {
+  padding: 8px 16px;
+  font-size: 11.5px;
+  color: var(--quota-low);
+  background: rgba(248, 113, 113, 0.08);
+  border-top: 1px solid rgba(248, 113, 113, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-note::before {
+  content: '⚠';
+  font-size: 13px;
+}
+
+/* ── Quota grid ──────────────────────────────────────────────────────────── */
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-glass);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--duration) var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+
+.model::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.02), transparent);
+  pointer-events: none;
+}
+
+.model:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.model-top {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.model-name {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-pct {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  flex: none;
+}
+
+.model-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.8;
+}
+
+/* Animated quota bars */
+.bar {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.15);
+  overflow: hidden;
+  position: relative;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.8s var(--ease);
+}
+
+/* Quota color system with glow */
+.quota-good { color: var(--quota-good); }
+.quota-warn { color: var(--quota-warn); }
+.quota-low  { color: var(--quota-low); }
+
+.bar-good {
+  background: linear-gradient(90deg, var(--quota-good), hsl(152, 68%, 55%));
+  box-shadow: 0 0 8px var(--quota-good-glow);
+}
+
+.bar-warn {
+  background: linear-gradient(90deg, var(--quota-warn), hsl(38, 90%, 55%));
+  box-shadow: 0 0 8px var(--quota-warn-glow);
+}
+
+.bar-low {
+  background: linear-gradient(90deg, var(--quota-low), hsl(0, 80%, 60%));
+  box-shadow: 0 0 8px var(--quota-low-glow);
+}
+
+/* ── Group buckets ───────────────────────────────────────────────────────── */
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.group-bucket {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  font-size: 10.5px;
+  font-weight: 500;
+  transition: all var(--duration) var(--ease);
+  background: var(--surface-glass);
+}
+
+.group-bucket:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+/* One row per quota group, its name leading the chips it owns. */
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+}
+
+.group-name {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.8;
+}
+
+/* Chips under a collapsed card sit tighter — they are the whole card body. */
+.groups.summary {
+  padding: 0 16px 12px 40px;
+}
+
+/* ── Full model list toggle ──────────────────────────────────────────────── */
+
+.more {
+  padding: 0 16px 12px;
+}
+
+/* ── Usage tab ───────────────────────────────────────────────────────────── */
+
+.usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.usage-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  background: linear-gradient(135deg, var(--vscode-foreground), var(--vscode-descriptionForeground));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.usage-table thead th {
+  background: var(--surface-1);
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.usage-table tbody tr {
+  transition: background var(--duration) var(--ease);
+}
+
+.usage-table tbody tr:hover {
+  background: var(--surface-glass);
+}
+
+.usage-table .num,
+.usage-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* ── Quota trend sparklines ──────────────────────────────────────────────── */
+
+.trends {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.trend {
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-glass);
+  transition: all var(--duration) var(--ease);
+}
+
+.trend:hover {
+  border-color: var(--border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.trend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.trend-name {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-foot {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.7;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 38px;
+  margin: 6px 0 4px;
+}
+
+.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px var(--accent-glow));
+}
+
+/* ── Empty states + footer ───────────────────────────────────────────────── */
+
+.empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.empty h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  margin: 0 0 8px;
+}
+
+.empty p {
+  margin: 0 auto 18px;
+  max-width: 360px;
+  line-height: 1.6;
+  font-size: 12.5px;
+  opacity: 0.85;
+}
+
+.empty-note {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  opacity: 0.75;
+  text-align: center;
+  padding: 16px;
+}
+
+.footer {
+  padding: 10px 16px 18px;
+  display: flex;
+  justify-content: center;
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  font-size: 11px;
+  transition: all var(--duration) var(--ease);
+  opacity: 0.7;
+}
+
+.link:hover {
+  opacity: 1;
+  text-decoration: none;
+  background: var(--surface-glass);
+}
+
+/* ── Entrance animations ─────────────────────────────────────────────────── */
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.account {
+  animation: fade-slide-in 0.4s var(--ease) both;
+}
+
+.account:nth-child(1) { animation-delay: 0s; }
+.account:nth-child(2) { animation-delay: 0.05s; }
+.account:nth-child(3) { animation-delay: 0.1s; }
+.account:nth-child(4) { animation-delay: 0.15s; }
+.account:nth-child(5) { animation-delay: 0.2s; }
+
+.integration-row {
+  animation: fade-slide-in 0.3s var(--ease) both;
+}
+
+.model {
+  animation: fade-slide-in 0.35s var(--ease) both;
+}
+
+/* ── Scrollbar styling ───────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.35);
+}
+
+/* ── Selection ───────────────────────────────────────────────────────────── */
+
+::selection {
+  background: var(--accent-subtle);
+}

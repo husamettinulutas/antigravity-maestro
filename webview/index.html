@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} https: data:; style-src {{cspSource}}; script-src {{cspSource}};"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{mainCssUri}}" />
+    <title>Antigravity Maestro</title>
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-tab="accounts" role="tab">Accounts</button>
+        <button class="tab" data-tab="usage" role="tab">Usage</button>
+      </div>
+      <div class="toolbar-actions">
+        <button id="collapse-all" class="btn subtle" title="Collapse or expand every account card">Collapse all</button>
+        <button id="refresh-all" class="btn" title="Refresh quotas for every account">Refresh</button>
+        <button id="add-account" class="btn primary">Add account</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="accounts-tab" class="tab-panel">
+        <section id="integrations" class="integrations"></section>
+        <div id="accounts"></div>
+        <div id="empty" class="empty hidden">
+          <img class="brand" src="{{logoUri}}" alt="" />
+          <h2>No accounts yet</h2>
+          <p>
+            Sign in with a Google account to see its Antigravity model quotas and use those models
+            in Copilot Chat, Claude Code and Codex.
+          </p>
+          <button id="add-account-empty" class="btn primary">Add your first account</button>
+        </div>
+      </section>
+
+      <section id="usage-tab" class="tab-panel hidden">
+        <div class="usage-header">
+          <h2>Token usage</h2>
+          <button id="clear-history" class="btn subtle">Clear history</button>
+        </div>
+        <div id="trends" class="trends"></div>
+        <table class="usage-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Model</th>
+              <th class="num">Requests</th>
+              <th class="num">Input</th>
+              <th class="num">Output</th>
+            </tr>
+          </thead>
+          <tbody id="usage-body"></tbody>
+        </table>
+        <p id="usage-empty" class="empty-note">
+          No requests recorded yet. Usage appears here once a model answers through Copilot, Claude
+          Code or Codex.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button id="open-logs" class="link">Open logs</button>
+    </footer>
+
+    <script src="{{appJsUri}}"></script>
+  </body>
+</html>

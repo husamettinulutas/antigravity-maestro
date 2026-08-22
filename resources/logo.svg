@@ -1,0 +1,29 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mark" x1="24" y1="16" x2="76" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9" />
+      <stop offset="1" stop-color="#A78BFA" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#67E8F9" stop-opacity="0.32" />
+      <stop offset="1" stop-color="#67E8F9" stop-opacity="0" />
+    </radialGradient>
+    <clipPath id="plate"><rect width="96" height="96" rx="22" /></clipPath>
+  </defs>
+
+  <g clip-path="url(#plate)">
+    <rect width="96" height="96" fill="#0D1117" />
+    <circle cx="48" cy="37.6" r="32" fill="url(#glow)" />
+
+    <!-- The model, held up by nothing -->
+    <circle cx="48" cy="37.6" r="15.6" fill="url(#mark)" />
+    <!-- The field beneath it, pressed down only where the weight hangs -->
+    <path
+      d="M0 62.4L16 62.4C30 62.4 34 73.6 48 73.6C62 73.6 66 62.4 80 62.4L96 62.4"
+      stroke="url(#mark)"
+      stroke-width="6.8"
+      stroke-linecap="round"
+      opacity="0.75"
+    />
+  </g>
+</svg>
