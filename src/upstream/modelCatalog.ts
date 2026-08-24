@@ -26,16 +26,43 @@ export interface CatalogModel {
 /**
  * Per-model output and thinking limits, mirroring what the Antigravity client
  * sends. The upstream rejects requests whose budget exceeds these.
+ *
+ * These are a fallback only: `fetchAvailableModels` reports `thinkingBudget`
+ * and `maxOutputTokens` per model, and those win when present. The table
+ * covers the ids the upstream reports without them, so a model still gets a
+ * sane ceiling instead of the generic default.
+ *
+ * Keyed by the ids the upstream actually serves. Several read as a different
+ * effort than their id suggests — `gemini-3-flash-agent` is listed as
+ * "Gemini 3.5 Flash (High)" — so the id, not the label, is what belongs here.
  */
 const MODEL_SPECS: Record<string, { maxOutputTokens: number; thinkingBudget: number }> = {
-  'gemini-3.5-flash-high': { maxOutputTokens: 65536, thinkingBudget: 10000 },
-  'gemini-3.5-flash-medium': { maxOutputTokens: 65536, thinkingBudget: 4000 },
-  'gemini-3.5-flash-low': { maxOutputTokens: 65536, thinkingBudget: 1000 },
+  // Gemini 3.5 Flash, in the effort order the upstream labels them with.
+  'gemini-3-flash-agent': { maxOutputTokens: 65536, thinkingBudget: 10000 },
+  'gemini-3.5-flash-low': { maxOutputTokens: 65536, thinkingBudget: 4000 },
   'gemini-3.5-flash-extra-low': { maxOutputTokens: 65536, thinkingBudget: 1000 },
+  // Gemini 3.6 / 3.7 Flash.
+  'gemini-3.6-flash-high': { maxOutputTokens: 65536, thinkingBudget: 10000 },
+  'gemini-3.6-flash-medium': { maxOutputTokens: 65536, thinkingBudget: 4000 },
+  'gemini-3.6-flash-low': { maxOutputTokens: 65536, thinkingBudget: 1000 },
+  'gemini-3.6-flash-tiered': { maxOutputTokens: 65536, thinkingBudget: 10000 },
+  'gemini-3.7-flash-tiered': { maxOutputTokens: 65536, thinkingBudget: 10000 },
+  // Gemini 3.x Flash and Pro.
   'gemini-3-flash': { maxOutputTokens: 65536, thinkingBudget: 32768 },
+  'gemini-3.1-flash-lite': { maxOutputTokens: 65536, thinkingBudget: 0 },
   'gemini-3.1-pro-low': { maxOutputTokens: 65536, thinkingBudget: 32768 },
   'gemini-3.1-pro-high': { maxOutputTokens: 65536, thinkingBudget: 32768 },
-  'gemini-3-pro-image': { maxOutputTokens: 65536, thinkingBudget: 24576 },
+  'gemini-pro-agent': { maxOutputTokens: 65536, thinkingBudget: 32768 },
+  // Gemini 2.5.
+  'gemini-2.5-flash': { maxOutputTokens: 65536, thinkingBudget: 0 },
+  'gemini-2.5-flash-thinking': { maxOutputTokens: 65536, thinkingBudget: 24576 },
+  'gemini-2.5-flash-lite': { maxOutputTokens: 65536, thinkingBudget: 0 },
+  'gemini-2.5-pro': { maxOutputTokens: 65536, thinkingBudget: 32768 },
+  // Image models do not think.
+  'gemini-3.1-flash-image': { maxOutputTokens: 65536, thinkingBudget: 0 },
+  'gemini-3-pro-image': { maxOutputTokens: 65536, thinkingBudget: 0 },
+  // Claude. Opus is clamped further in `applyGenerationConstraints`.
+  'claude-sonnet-4-6': { maxOutputTokens: 64000, thinkingBudget: 32768 },
   'claude-sonnet-4-6-thinking': { maxOutputTokens: 64000, thinkingBudget: 32768 },
   'claude-opus-4-6-thinking': { maxOutputTokens: 64000, thinkingBudget: 24576 },
   'gpt-oss-120b-medium': { maxOutputTokens: 32768, thinkingBudget: 0 },

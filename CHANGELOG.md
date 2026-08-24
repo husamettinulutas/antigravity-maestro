@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.3
+
+- **A rate limited endpoint is not retried on every request.** The primary Cloud
+  Code host can be exhausted while the fallback still serves, and the failover
+  worked — but nothing remembered it, so every single request paid a doomed
+  round trip to the dead host before succeeding on the second one. Logs filled
+  with `failed (HTTP 429), trying the next endpoint` for requests that were
+  actually completing. A host that fails while a later one succeeds is now
+  demoted for five minutes; it is reordered rather than dropped, so it still
+  serves when everything else is down, and the lapsing TTL doubles as a probe
+  that picks it back up once it recovers.
+- **The per-model limits table matches the ids the upstream serves.** It had
+  drifted: four entries named models that are never sent (`gemini-3.5-flash-high`,
+  `gemini-3.5-flash-medium`, `gemini-3-pro-image`, `claude-sonnet-4-6-thinking`),
+  while fourteen ids that are sent had none — `gemini-3-flash-agent`, the whole
+  3.6/3.7 Flash family, `claude-sonnet-4-6` and the 2.5 models all fell back to
+  the generic default. These limits are a fallback (the upstream reports its own
+  `thinkingBudget` per model, and that still wins), but the fallback is what
+  applies whenever it does not.
+- **A model name that disagrees with its id shows the id too.** The upstream
+  offers `gemini-3-flash-agent` under the label "Gemini 3.5 Flash (High)", so the
+  list claimed a version the request would never ask for. The label is kept — it
+  is what the model is findable by — and the id is appended where the two name
+  different models. A differing effort alone is left alone, since the id already
+  spells that out.
+
 ## 1.0.2
 
 - **Tool call ids survive the round trip in Copilot Chat too.** 1.0.1 fixed this

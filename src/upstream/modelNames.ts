@@ -16,6 +16,12 @@
  * client shows for it, so it is kept — that is the name the user is looking
  * for. A label shared by several ids says nothing about which one is which, so
  * every model under it falls back to the name derived from its id.
+ *
+ * A kept label can still disagree with the id it belongs to:
+ * `gemini-3-flash-agent` is offered as "Gemini 3.5 Flash (High)". The id is
+ * what every request carries, so where the two disagree the label keeps the
+ * name the model is findable by and the id is appended, rather than letting a
+ * list claim a version the request will not ask for.
  */
 export function displayNamesFor(
   models: readonly { modelId: string; displayName?: string }[],
@@ -31,12 +37,56 @@ export function displayNamesFor(
   const names: Record<string, string> = {};
   for (const model of models) {
     const label = model.displayName?.trim();
-    names[model.modelId] =
-      label && uses.get(label) === 1
-        ? label
-        : (displayNameFor(model.modelId) ?? label ?? model.modelId);
+    if (label && uses.get(label) === 1) {
+      names[model.modelId] = disambiguate(label, model.modelId);
+      continue;
+    }
+    names[model.modelId] = displayNameFor(model.modelId) ?? label ?? model.modelId;
   }
   return names;
+}
+
+/**
+ * Keep `label`, but append the id when the two name different models — the
+ * upstream label is what the model is findable by, and the id is what the
+ * request actually carries.
+ */
+function disambiguate(label: string, modelId: string): string {
+  const derived = displayNameFor(modelId);
+  if (!derived || !conflicts(label, derived)) {
+    return label;
+  }
+  return `${label} · ${modelId}`;
+}
+
+/**
+ * True when two names disagree on more than an effort suffix — a differing
+ * version or family. "Gemini 3.5 Flash (High)" against "Gemini 3 Flash (Agent)"
+ * conflicts; the same name with a different mode does not.
+ */
+function conflicts(label: string, derived: string): boolean {
+  return stripMode(label) !== stripMode(derived);
+}
+
+/**
+ * Drop a trailing effort from a name so only the model itself is compared.
+ * The upstream writes it either way — "Gemini 3.5 Flash (High)" and
+ * "Gemini 3.5 Flash High" name the same model.
+ */
+function stripMode(name: string): string {
+  const bare = name.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+  const words = bare.split(/\s+/);
+  const last = words[words.length - 1];
+  // `MODES` keys are dashed (`extra-low`); the spelled-out form is spaced.
+  const modes = new Set(Object.keys(MODES).map((mode) => mode.replace(/-/g, ' ')));
+  if (words.length > 1 && modes.has(last)) {
+    words.pop();
+    // "extra low" reads as two words, so the qualifier goes with it.
+    if (words.length > 1 && modes.has(`${words[words.length - 1]} ${last}`)) {
+      words.pop();
+    }
+  }
+  return words.join(' ');
 }
 
 /** Trailing tokens that name an effort or mode rather than the model. */

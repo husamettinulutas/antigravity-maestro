@@ -34,6 +34,44 @@ function projectHeaderIsRejected(projectId: string): boolean {
   return true;
 }
 
+/**
+ * Endpoints that failed while a later one served the same request, and when.
+ * The primary host can be rate limited while the fallback is healthy, so
+ * without this every request pays a doomed round trip before failing over.
+ */
+const degradedEndpoints = new Map<string, number>();
+const ENDPOINT_DEGRADED_TTL_MS = 5 * 60 * 1000;
+
+function endpointIsDegraded(baseUrl: string): boolean {
+  const at = degradedEndpoints.get(baseUrl);
+  if (at === undefined) {
+    return false;
+  }
+  if (Date.now() - at > ENDPOINT_DEGRADED_TTL_MS) {
+    // The TTL doubles as a probe: once it lapses the endpoint is tried first
+    // again, so a recovered host is picked back up on its own.
+    degradedEndpoints.delete(baseUrl);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Endpoints to try, healthy ones first and configured order kept within each
+ * group. A degraded endpoint is demoted rather than dropped, so it still
+ * serves when everything else is down.
+ */
+function orderedEndpoints(): string[] {
+  const healthy = BASE_URLS.filter((url) => !endpointIsDegraded(url));
+  const degraded = BASE_URLS.filter((url) => endpointIsDegraded(url));
+  return [...healthy, ...degraded];
+}
+
+/** Exposed for tests; the memo is module state that would otherwise leak. */
+export function resetEndpointHealth(): void {
+  degradedEndpoints.clear();
+}
+
 export interface GenerateParams {
   model: string;
   request: GeminiRequest;
@@ -122,10 +160,15 @@ export class CloudCodeClient {
     for (let attempt = 0; attempt < 2; attempt++) {
       let justDisabledProjectHeader = false;
 
-      for (let index = 0; index < BASE_URLS.length; index++) {
-        const url = `${BASE_URLS[index]}${path}`;
+      // Re-read each pass: a 403 retry should still skip a host that just
+      // proved to be degraded.
+      const endpoints = orderedEndpoints();
+
+      for (let index = 0; index < endpoints.length; index++) {
+        const baseUrl = endpoints[index];
+        const url = `${baseUrl}${path}`;
         try {
-          return await httpRequest(url, {
+          const response = await httpRequest(url, {
             method: 'POST',
             headers: this.buildHeaders(params, projectHeaderDisabled),
             body: serialized,
@@ -133,6 +176,9 @@ export class CloudCodeClient {
             proxyUrl: Config.upstreamProxyUrl(),
             signal: params.signal,
           });
+          // Serving a request clears any doubt about this host.
+          degradedEndpoints.delete(baseUrl);
+          return response;
         } catch (error) {
           lastError = error;
 
@@ -149,11 +195,19 @@ export class CloudCodeClient {
             break;
           }
 
-          const hasNextEndpoint = index + 1 < BASE_URLS.length;
+          const hasNextEndpoint = index + 1 < endpoints.length;
           if (!hasNextEndpoint || !shouldFailover(error)) {
             throw toUpstreamError(error);
           }
-          Logger.warn(`Upstream ${url} failed (${describe(error)}), trying the next endpoint`);
+          // Only demote when a later endpoint can still be tried — a failure
+          // with nowhere left to fail over says nothing about this host.
+          if (!degradedEndpoints.has(baseUrl)) {
+            Logger.warn(
+              `Upstream ${url} failed (${describe(error)}); preferring the next endpoint for ` +
+                `${ENDPOINT_DEGRADED_TTL_MS / 60_000}m`,
+            );
+          }
+          degradedEndpoints.set(baseUrl, Date.now());
         }
       }
 
