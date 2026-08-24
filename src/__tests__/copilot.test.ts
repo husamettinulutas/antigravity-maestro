@@ -47,9 +47,17 @@ test('copilot: a tool call and its result become functionCall + functionResponse
   ]);
 
   assert.equal(contents[1].role, 'model');
-  assert.deepEqual(contents[1].parts[0].functionCall, { name: 'listDir', args: { path: '.' } });
+  // The id has to survive both directions: for the Claude models the upstream
+  // translates these into Anthropic `tool_use` / `tool_result` blocks, and
+  // rejects the whole request when the call carries no id.
+  assert.deepEqual(contents[1].parts[0].functionCall, {
+    id: 'call_1',
+    name: 'listDir',
+    args: { path: '.' },
+  });
   assert.equal(contents[2].role, 'user');
   assert.deepEqual(contents[2].parts[0].functionResponse, {
+    id: 'call_1',
     name: 'listDir',
     response: { output: 'a.txt' },
   });

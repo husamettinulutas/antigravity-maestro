@@ -16,6 +16,7 @@ import { signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
 import { ModelCatalog } from '../upstream/modelCatalog';
+import { prefixedId } from '../utils/ids';
 import { Logger } from '../utils/logger';
 
 /** Rough characters-per-token ratio used for the token count estimate. */
@@ -204,7 +205,10 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
   ): boolean {
     if (part.functionCall?.name) {
-      const callId = `call_${Math.random().toString(36).slice(2, 12)}`;
+      // The upstream's own id is kept when it sends one: the Claude models are
+      // served by translating this into the Anthropic format, and the id has to
+      // match the `tool_use` block the next turn refers back to.
+      const callId = part.functionCall.id || prefixedId('call');
       signatureStore.rememberToolCall(callId, part.thoughtSignature);
       progress.report(
         new vscode.LanguageModelToolCallPart(callId, part.functionCall.name, part.functionCall.args ?? {}),
@@ -338,6 +342,9 @@ function convertPart(
     const signature = signatureStore.forToolCall(part.callId);
     return {
       functionCall: {
+        // Required: for the Claude models the upstream turns this back into an
+        // Anthropic `tool_use` block, which rejects the request without an id.
+        id: part.callId,
         name: part.name,
         args: typeof part.input === 'object' && part.input ? (part.input as any) : {},
       },
@@ -348,7 +355,7 @@ function convertPart(
   if (isToolResultPart(part)) {
     const name = toolNames.get(part.callId) ?? 'tool';
     const output = extractText(part.content) || '(no output)';
-    return { functionResponse: { name, response: { output } } };
+    return { functionResponse: { id: part.callId, name, response: { output } } };
   }
 
   if (isImagePart(part)) {

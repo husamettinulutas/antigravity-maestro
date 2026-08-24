@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2
+
+- **Tool call ids survive the round trip in Copilot Chat too.** 1.0.1 fixed this
+  for the gateway the CLI agents talk to, but the in-process provider behind the
+  Copilot model picker still dropped the id in both directions: the id the
+  upstream sent was replaced with a locally generated one, and the calls sent
+  back carried none at all. So the same `tool_use.id: Field required` failure
+  survived on the one path most people use, on every turn after the first tool
+  call.
+
 ## 1.0.1
 
 Fixes a request storm: a single prompt could loop until the account's quota was
