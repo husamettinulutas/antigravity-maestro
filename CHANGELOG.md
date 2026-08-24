@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.22
+
+- The commit-message model is applied for real. Copilot resolves
+  `chat.utilitySmallModel` through `lm.selectChatModels`, which asks this
+  extension for its model list — and once the models had been withdrawn from
+  Copilot that list was empty, so every commit message fell back to Copilot's
+  own quota while the panel claimed otherwise. Picking a model now publishes
+  them again, and the pick is verified against `lm.selectChatModels` before the
+  panel says it took.
+- A commit-message model the upstream has stopped offering is moved onto the
+  nearest one still available. Model ids come from live quota data and rotate;
+  a stale id resolved to nothing and Copilot fell back silently.
+- Restoring Copilot clears the commit-message setting as well — with the models
+  withdrawn it could only name something Copilot cannot reach.
+- The panel's commit-message row separates "in use" from "configured but
+  unreachable" instead of showing both as active.
+
 ## 0.1.21
 
 - The `antigravityMaestro.toolDriverModel` split from 0.1.20 is removed. Moving
