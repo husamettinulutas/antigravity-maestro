@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.5
+
+- **The model id is no longer appended to the name.** 1.0.3 added it where the
+  upstream label disagreed with the id, and 1.0.4 stopped it repeating — but the
+  premise was wrong. Every surface that shows a model name already shows its id
+  beside it: the model pickers list both, and the panel prints the id under each
+  card. So the name carried a second copy of what was on screen already, which
+  read as a stutter. A unique label is now kept as it is; the id speaks for
+  itself. Resolving a label that several ids share, which is what made the list
+  readable in the first place, is unchanged.
+
 ## 1.0.4
 
 - **The appended model id is no longer repeated.** 1.0.3 started showing the id

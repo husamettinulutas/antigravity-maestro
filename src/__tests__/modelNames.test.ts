@@ -47,16 +47,6 @@ test('a label only one model uses is the name that model keeps', () => {
   });
 });
 
-test('a label that disagrees with its id carries the id alongside it', () => {
-  // The upstream offers `gemini-3-flash-agent` as "Gemini 3.5 Flash (High)".
-  // The label is kept — it is what the model is findable by — but the id the
-  // request will actually carry has to stay visible next to it.
-  const names = displayNamesFor([
-    { modelId: 'gemini-3-flash-agent', displayName: 'Gemini 3.5 Flash (High)' },
-  ]);
-  assert.equal(names['gemini-3-flash-agent'], 'Gemini 3.5 Flash (High) · gemini-3-flash-agent');
-});
-
 test('a label matching its id is left alone', () => {
   const names = displayNamesFor([
     { modelId: 'gemini-3.1-pro-high', displayName: 'Gemini 3.1 Pro (High)' },
@@ -64,12 +54,15 @@ test('a label matching its id is left alone', () => {
   assert.equal(names['gemini-3.1-pro-high'], 'Gemini 3.1 Pro (High)');
 });
 
-test('a differing effort alone does not count as a conflict', () => {
-  // Only the mode differs, and the id already spells it out — appending the id
-  // here would add noise rather than resolve anything.
+test('a unique label is kept even where it disagrees with its id', () => {
+  // The upstream offers `gemini-3-flash-agent` as "Gemini 3.5 Flash (High)" and
+  // `gemini-3.5-flash-low` as "(Medium)". Every surface prints the id beside
+  // the name, so the label is left to be the name and the id speaks for itself.
   const names = displayNamesFor([
+    { modelId: 'gemini-3-flash-agent', displayName: 'Gemini 3.5 Flash (High)' },
     { modelId: 'gemini-3.5-flash-low', displayName: 'Gemini 3.5 Flash (Medium)' },
   ]);
+  assert.equal(names['gemini-3-flash-agent'], 'Gemini 3.5 Flash (High)');
   assert.equal(names['gemini-3.5-flash-low'], 'Gemini 3.5 Flash (Medium)');
 });
 
@@ -80,22 +73,4 @@ test('a shared label still falls back to the name derived from the id', () => {
   ]);
   assert.equal(names['gemini-2.5-flash'], 'Gemini 2.5 Flash');
   assert.equal(names['gemini-3.1-flash-lite'], 'Gemini 3.1 Flash Lite');
-});
-
-test('naming the same list twice does not append the id again', () => {
-  // The quota service stores the name it produced back onto the model, and the
-  // catalog and the panel each name that stored list again. Appending per pass
-  // is what put the id on screen three times over.
-  const models = [{ modelId: 'gemini-3-flash-agent', displayName: 'Gemini 3.5 Flash (High)' }];
-  const once = displayNamesFor(models);
-  const twice = displayNamesFor([
-    { modelId: 'gemini-3-flash-agent', displayName: once['gemini-3-flash-agent'] },
-  ]);
-  const thrice = displayNamesFor([
-    { modelId: 'gemini-3-flash-agent', displayName: twice['gemini-3-flash-agent'] },
-  ]);
-
-  assert.equal(once['gemini-3-flash-agent'], 'Gemini 3.5 Flash (High) · gemini-3-flash-agent');
-  assert.equal(twice['gemini-3-flash-agent'], once['gemini-3-flash-agent']);
-  assert.equal(thrice['gemini-3-flash-agent'], once['gemini-3-flash-agent']);
 });

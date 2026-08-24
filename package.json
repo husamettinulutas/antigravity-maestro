@@ -2,7 +2,7 @@
   "name": "antigravity-maestro",
   "displayName": "Antigravity Maestro",
   "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "husamettinulutas",
   "author": {
     "name": "Hüsamettin Ulutaş",
