@@ -11,7 +11,9 @@ export function toAnthropicResponse(response: GeminiResponse, model: string): An
 
   for (const part of candidate?.content?.parts ?? []) {
     if (part.functionCall?.name) {
-      const id = prefixedId('toolu');
+      // Reuse the upstream id when there is one, so replaying this call on the
+      // next turn carries the id the upstream itself issued.
+      const id = part.functionCall.id || prefixedId('toolu');
       signatureStore.rememberToolCall(id, part.thoughtSignature);
       content.push({
         type: 'tool_use',

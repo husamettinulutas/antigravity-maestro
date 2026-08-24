@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.1
+
+Fixes a request storm: a single prompt could loop until the account's quota was
+gone.
+
+- **Tool call ids survive the round trip.** The Claude models are served by
+  translating the request back into the Anthropic format, and that translation
+  rejects a `tool_use` block with no id. The id was being dropped, so every turn
+  after the first tool call failed with `tool_use.id: Field required` — for good.
+  The client retried, resending the whole conversation each time.
+- **An account that is out of headroom is left alone.** Once every account was
+  cooling down the lease fell back to the active one anyway, so each retry
+  earned a fresh rate limit and spent more quota. It now reports the wait
+  instead. Without a `retry-after` the backoff starts at 30s and doubles per
+  consecutive rate limit rather than jumping straight to the configured maximum,
+  and a successful request clears it.
+- **Errors say whether they are worth retrying.** The gateway returns
+  `invalid_request_error` for a malformed request instead of `api_error`, sets
+  `x-should-retry: false` on what cannot succeed twice, and passes `retry-after`
+  through on rate limits, so clients back off instead of hammering.
+- **The rejected project header is remembered.** It was re-sent on every request,
+  costing a doomed 403 round trip each time before the retry without it.
+
 ## 1.0.0
 
 First public release. Everything below this line is the development history that

@@ -59,7 +59,8 @@ export class ChatStreamMapper {
 
   private pushPart(part: GeminiPart): string {
     if (part.functionCall?.name) {
-      const id = prefixedId('call');
+      // Reuse the upstream id when there is one, so the replayed call keeps it.
+      const id = part.functionCall.id || prefixedId('call');
       signatureStore.rememberToolCall(id, part.thoughtSignature);
       this.usedTool = true;
       this.toolIndex += 1;
@@ -127,7 +128,8 @@ export function toChatCompletion(response: GeminiResponse, model: string) {
 
   for (const part of response.candidates?.[0]?.content?.parts ?? []) {
     if (part.functionCall?.name) {
-      const id = prefixedId('call');
+      // Reuse the upstream id when there is one, so the replayed call keeps it.
+      const id = part.functionCall.id || prefixedId('call');
       signatureStore.rememberToolCall(id, part.thoughtSignature);
       toolCalls.push({
         id,

@@ -128,7 +128,10 @@ function convertAssistantContent(message: AnthropicMessage): GeminiPart[] {
       case 'tool_use': {
         const toolUse = block as AnthropicToolUseBlock;
         parts.push({
-          functionCall: { name: toolUse.name, args: toolUse.input ?? {} },
+          // The id is required: for the Claude models the upstream turns this
+          // back into an Anthropic `tool_use` block and rejects the whole
+          // request when it has none.
+          functionCall: { id: toolUse.id, name: toolUse.name, args: toolUse.input ?? {} },
           thoughtSignature: signatureStore.forToolCall(toolUse.id) ?? pendingSignature,
         });
         break;
@@ -171,6 +174,7 @@ function convertUserContent(
         const output = flattenToolResult(result.content);
         parts.push({
           functionResponse: {
+            id: result.tool_use_id,
             name,
             response: result.is_error ? { error: output } : { output },
           },

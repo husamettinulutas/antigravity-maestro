@@ -119,7 +119,9 @@ export class AnthropicStreamMapper {
   }
 
   private emitToolCall(part: GeminiPart): string {
-    const id = prefixedId('toolu');
+    // Reuse the upstream id when there is one, so replaying this call on the
+    // next turn carries the id the upstream itself issued.
+    const id = part.functionCall!.id || prefixedId('toolu');
     signatureStore.rememberToolCall(id, part.thoughtSignature);
     this.usedTool = true;
 

@@ -48,12 +48,38 @@ test('anthropic request: tool results are named from the call that made them', (
 
   const [, model, toolTurn] = request.contents;
   assert.equal(model.role, 'model');
-  assert.deepEqual(model.parts[0].functionCall, { name: 'bash', args: { cmd: 'ls' } });
+  assert.deepEqual(model.parts[0].functionCall, {
+    id: 'toolu_1',
+    name: 'bash',
+    args: { cmd: 'ls' },
+  });
   assert.equal(toolTurn.role, 'user');
   assert.deepEqual(toolTurn.parts[0].functionResponse, {
+    id: 'toolu_1',
     name: 'bash',
     response: { output: 'a.txt' },
   });
+});
+
+test('anthropic stream: a tool call keeps the id the upstream issued', () => {
+  const mapper = new AnthropicStreamMapper('claude-opus-4-6-thinking');
+  const events = parseEvents(
+    mapper.push({
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ functionCall: { id: 'toolu_upstream', name: 'bash', args: {} } }],
+          },
+        },
+      ],
+    }),
+  );
+
+  // Minting a fresh id here would strand the tool_result the client sends back,
+  // and the upstream rejects the replayed call outright.
+  const start = events.find((event) => event.event === 'content_block_start');
+  assert.equal(start!.data.content_block.id, 'toolu_upstream');
 });
 
 test('anthropic request: an unsigned thinking block degrades to plain text', () => {
@@ -153,10 +179,12 @@ test('responses request: function_call output is paired with its call', () => {
 
   assert.deepEqual(request.systemInstruction, { parts: [{ text: 'You are Codex.' }] });
   assert.deepEqual(request.contents[1].parts[0].functionCall, {
+    id: 'call_1',
     name: 'shell',
     args: { cmd: 'ls' },
   });
   assert.deepEqual(request.contents[2].parts[0].functionResponse, {
+    id: 'call_1',
     name: 'shell',
     response: { output: 'a.txt' },
   });

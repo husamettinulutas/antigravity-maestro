@@ -1,11 +1,19 @@
 /** Gemini wire types, limited to the fields the Antigravity endpoints use. */
 
 export interface FunctionCall {
+  /**
+   * Client-side call id. The Claude models are served by translating this
+   * request into the Anthropic format, and that translation rejects a tool call
+   * with no id, so it has to survive the round trip.
+   */
+  id?: string;
   name: string;
   args?: Record<string, unknown>;
 }
 
 export interface FunctionResponse {
+  /** Matches the `id` of the call this responds to. */
+  id?: string;
   name: string;
   response: Record<string, unknown>;
 }

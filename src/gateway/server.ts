@@ -422,14 +422,20 @@ export class GatewayServer {
     }
 
     if (error instanceof NoAccountAvailableError) {
-      sendJson(res, 503, errorBody('overloaded_error', error.message));
+      Logger.warn(`No account available: ${error.message}`);
+      sendJson(res, 503, errorBody('overloaded_error', error.message), {
+        ...retryAfterHeader(error.retryAfterSeconds),
+      });
       return;
     }
     if (error instanceof UpstreamError) {
       const status = error.isRateLimit ? 429 : (error.status ?? 502);
-      const type = error.isRateLimit ? 'rate_limit_error' : 'api_error';
       Logger.warn(`Upstream error ${status}: ${error.message}`);
-      sendJson(res, status, errorBody(type, error.message));
+      sendJson(res, status, errorBody(errorTypeFor(status), error.message), {
+        // A malformed request fails the same way however often it is sent, so
+        // the client is told outright not to retry it.
+        ...(isRetryable(status) ? retryAfterHeader(error.retryAfterSeconds) : { 'x-should-retry': 'false' }),
+      });
       return;
     }
 
@@ -475,13 +481,45 @@ async function readJsonBody<T>(req: http.IncomingMessage): Promise<T | undefined
   return JSON.parse(text) as T;
 }
 
-export function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+export function sendJson(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),
+    ...headers,
   });
   res.end(payload);
+}
+
+/** Statuses an Anthropic- or OpenAI-compatible client is right to retry. */
+function isRetryable(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** The error type clients use to decide whether a request is worth repeating. */
+function errorTypeFor(status: number): string {
+  if (status === 429) {
+    return 'rate_limit_error';
+  }
+  if (status === 401 || status === 403) {
+    return 'authentication_error';
+  }
+  if (status === 404) {
+    return 'not_found_error';
+  }
+  if (status >= 400 && status < 500) {
+    return 'invalid_request_error';
+  }
+  return 'api_error';
+}
+
+function retryAfterHeader(seconds: number | undefined): Record<string, string> {
+  return seconds && seconds > 0 ? { 'retry-after': String(Math.ceil(seconds)) } : {};
 }
 
 export function errorBody(type: string, message: string) {

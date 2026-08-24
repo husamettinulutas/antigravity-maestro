@@ -15,6 +15,25 @@ const BASE_URLS = [
 /** Antigravity tags requests so they draw from the Google One AI allowance. */
 const CREDIT_TYPES = ['GOOGLE_ONE_AI'];
 
+/**
+ * Projects whose header the upstream has rejected, and when. Without this every
+ * request pays for a doomed 403 round trip before retrying without the header.
+ */
+const rejectedProjects = new Map<string, number>();
+const PROJECT_REJECTION_TTL_MS = 60 * 60 * 1000;
+
+function projectHeaderIsRejected(projectId: string): boolean {
+  const at = rejectedProjects.get(projectId);
+  if (at === undefined) {
+    return false;
+  }
+  if (Date.now() - at > PROJECT_REJECTION_TTL_MS) {
+    rejectedProjects.delete(projectId);
+    return false;
+  }
+  return true;
+}
+
 export interface GenerateParams {
   model: string;
   request: GeminiRequest;
@@ -94,12 +113,15 @@ export class CloudCodeClient {
   private async send(path: string, params: GenerateParams) {
     const body = this.buildBody(params);
     const serialized = JSON.stringify(body);
-    let projectHeaderDisabled = false;
+    let projectHeaderDisabled =
+      params.projectId !== undefined && projectHeaderIsRejected(params.projectId);
     let lastError: unknown;
 
     // Two passes: the second one runs only when the project header was the
     // reason for a 403.
     for (let attempt = 0; attempt < 2; attempt++) {
+      let justDisabledProjectHeader = false;
+
       for (let index = 0; index < BASE_URLS.length; index++) {
         const url = `${BASE_URLS[index]}${path}`;
         try {
@@ -121,7 +143,9 @@ export class CloudCodeClient {
             params.projectId
           ) {
             Logger.warn('Upstream rejected the project header; retrying without it');
+            rejectedProjects.set(params.projectId, Date.now());
             projectHeaderDisabled = true;
+            justDisabledProjectHeader = true;
             break;
           }
 
@@ -133,7 +157,9 @@ export class CloudCodeClient {
         }
       }
 
-      if (!projectHeaderDisabled) {
+      // The second pass exists only to redo the call without the header the
+      // upstream just rejected; anything else is already final.
+      if (!justDisabledProjectHeader) {
         break;
       }
     }

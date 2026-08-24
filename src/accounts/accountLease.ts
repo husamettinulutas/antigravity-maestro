@@ -17,7 +17,11 @@ export interface LeaseContext {
 }
 
 export class NoAccountAvailableError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** Seconds the client should wait before asking again, when known. */
+    readonly retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = 'NoAccountAvailableError';
   }
@@ -26,7 +30,12 @@ export class NoAccountAvailableError extends Error {
 interface Cooldown {
   until: number;
   reason: string;
+  /** Rate limits in a row, so repeated failures back off further each time. */
+  strikes: number;
 }
+
+/** First backoff when the upstream gives no `retry-after`. */
+const BASE_COOLDOWN_MS = 30_000;
 
 /**
  * Picks the account each request runs on and retries on another one when the
@@ -52,7 +61,13 @@ export class AccountLease {
   ): Promise<T> {
     const candidates = this.orderCandidates(requestedModel);
     if (candidates.length === 0) {
-      throw new NoAccountAvailableError(this.explainNoCandidates());
+      // Sending anyway would earn another rate limit and burn more quota, so
+      // the wait is reported instead — that is what stops a retrying client
+      // from hammering an account that is already out of headroom.
+      throw new NoAccountAvailableError(
+        this.explainNoCandidates(requestedModel),
+        this.shortestCooldown(requestedModel),
+      );
     }
 
     let lastError: unknown;
@@ -74,6 +89,7 @@ export class AccountLease {
           model,
         });
 
+        this.clearCooldown(account.id, model.id);
         await this.promoteIfRotated(account);
         return result;
       } catch (error) {
@@ -97,7 +113,10 @@ export class AccountLease {
     if (lastError) {
       throw lastError;
     }
-    throw new NoAccountAvailableError(this.explainNoCandidates());
+    throw new NoAccountAvailableError(
+      this.explainNoCandidates(requestedModel),
+      this.shortestCooldown(requestedModel),
+    );
   }
 
   /** Record the token spend of a completed request. */
@@ -122,12 +141,16 @@ export class AccountLease {
     retryAfterSeconds: number | undefined,
     reason: string,
   ): void {
-    const fallbackMs = Config.rotationCooldownMinutes() * 60_000;
-    const durationMs = retryAfterSeconds ? retryAfterSeconds * 1000 : fallbackMs;
-    this.cooldowns.set(cooldownKey(accountId, modelId), {
-      until: Date.now() + durationMs,
-      reason,
-    });
+    const key = cooldownKey(accountId, modelId);
+    const strikes = (this.cooldowns.get(key)?.strikes ?? 0) + 1;
+    const capMs = Math.max(BASE_COOLDOWN_MS, Config.rotationCooldownMinutes() * 60_000);
+    // Without a `retry-after` the wait doubles per consecutive rate limit, so a
+    // one-off blip costs 30s while a genuinely exhausted account backs off to
+    // the configured maximum.
+    const durationMs = retryAfterSeconds
+      ? retryAfterSeconds * 1000
+      : Math.min(BASE_COOLDOWN_MS * 2 ** (strikes - 1), capMs);
+    this.cooldowns.set(key, { until: Date.now() + durationMs, reason, strikes });
   }
 
   /** Remaining cooldown in seconds, or 0 when the account is usable. */
@@ -147,6 +170,24 @@ export class AccountLease {
     this.cooldowns.clear();
   }
 
+  /** Forget an account's rate-limit history once it serves a request again. */
+  private clearCooldown(accountId: string, modelId: string): void {
+    this.cooldowns.delete(cooldownKey(accountId, modelId));
+  }
+
+  /** Shortest wait across every account that could serve the model. */
+  private shortestCooldown(requestedModel: string): number | undefined {
+    const waits = this.accounts
+      .list()
+      .filter((account) => !account.needsReauth)
+      .map((account) => {
+        const model = this.catalog.resolve(requestedModel, account.id);
+        return model ? this.cooldownSeconds(account.id, model.id) : 0;
+      })
+      .filter((seconds) => seconds > 0);
+    return waits.length > 0 ? Math.min(...waits) : undefined;
+  }
+
   // ── Selection ──────────────────────────────────────────────────────────────
 
   /**
@@ -159,20 +200,17 @@ export class AccountLease {
     const strategy = Config.rotationStrategy();
 
     if (strategy === 'manual') {
-      // No rotation was asked for, so the upstream error is the honest answer.
-      return active ? [active] : [];
+      // No rotation was asked for, so it is this account or nothing — but a
+      // cooling-down account is still skipped rather than re-hammered.
+      return active && this.isUsable(active, requestedModel) ? [active] : [];
     }
 
     const usable = this.accounts
       .list()
-      .filter((account) => !account.needsReauth)
-      .filter((account) => {
-        const model = this.catalog.resolve(requestedModel, account.id);
-        return model ? this.cooldownSeconds(account.id, model.id) === 0 : false;
-      });
+      .filter((account) => this.isUsable(account, requestedModel));
 
     if (usable.length === 0) {
-      return active ? [active] : [];
+      return [];
     }
 
     const fallbacks = usable.filter((account) => account.id !== active?.id);
@@ -185,6 +223,15 @@ export class AccountLease {
 
     const activeIsUsable = active !== undefined && usable.some((a) => a.id === active.id);
     return activeIsUsable ? [active!, ...ordered] : ordered;
+  }
+
+  /** True when the account can serve the model right now. */
+  private isUsable(account: AccountMetadata, requestedModel: string): boolean {
+    if (account.needsReauth) {
+      return false;
+    }
+    const model = this.catalog.resolve(requestedModel, account.id);
+    return model ? this.cooldownSeconds(account.id, model.id) === 0 : false;
   }
 
   private rotate(accounts: AccountMetadata[]): AccountMetadata[] {
@@ -213,13 +260,17 @@ export class AccountLease {
     }
   }
 
-  private explainNoCandidates(): string {
+  private explainNoCandidates(requestedModel: string): string {
     const all = this.accounts.list();
     if (all.length === 0) {
       return 'No Google account has been added yet — run "Antigravity Maestro: Add Google Account".';
     }
     if (all.every((account) => account.needsReauth)) {
       return 'Every account needs to sign in again.';
+    }
+    const wait = this.shortestCooldown(requestedModel);
+    if (wait !== undefined) {
+      return `Every account is rate limited on this model. Try again in ${wait}s.`;
     }
     return 'No account currently has quota for this model. Refresh quotas or wait for the reset.';
   }

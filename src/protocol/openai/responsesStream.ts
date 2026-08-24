@@ -142,7 +142,8 @@ export class ResponsesStreamMapper {
   }
 
   private emitFunctionCall(part: GeminiPart): string {
-    const callId = prefixedId('call');
+    // Reuse the upstream id when there is one, so the replayed call keeps it.
+    const callId = part.functionCall!.id || prefixedId('call');
     signatureStore.rememberToolCall(callId, part.thoughtSignature);
     const args = JSON.stringify(part.functionCall!.args ?? {});
 
@@ -272,7 +273,8 @@ export function toResponsesResponse(response: GeminiResponse, model: string) {
 
   for (const part of response.candidates?.[0]?.content?.parts ?? []) {
     if (part.functionCall?.name) {
-      const callId = prefixedId('call');
+      // Reuse the upstream id when there is one, so the replayed call keeps it.
+      const callId = part.functionCall.id || prefixedId('call');
       signatureStore.rememberToolCall(callId, part.thoughtSignature);
       output.push({
         id: prefixedId('fc'),

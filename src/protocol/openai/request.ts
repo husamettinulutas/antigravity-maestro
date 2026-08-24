@@ -141,7 +141,11 @@ function convertItem(
         role: 'model',
         parts: [
           {
-            functionCall: { name: item.name ?? 'tool', args: parseArguments(item.arguments) },
+            functionCall: {
+              id: item.call_id,
+              name: item.name ?? 'tool',
+              args: parseArguments(item.arguments),
+            },
             thoughtSignature: signature,
           },
         ],
@@ -151,7 +155,15 @@ function convertItem(
       const name = (item.call_id && toolNames.get(item.call_id)) || 'tool';
       return {
         role: 'user',
-        parts: [{ functionResponse: { name, response: { output: outputText(item.output) } } }],
+        parts: [
+          {
+            functionResponse: {
+              id: item.call_id,
+              name,
+              response: { output: outputText(item.output) },
+            },
+          },
+        ],
       };
     }
     case 'reasoning':
@@ -248,7 +260,15 @@ function responsesToolChoice(choice: ResponsesRequest['tool_choice']) {
 function convertChatMessage(message: ChatMessage, toolNames: Map<string, string>): GeminiPart[] {
   if (message.role === 'tool') {
     const name = (message.tool_call_id && toolNames.get(message.tool_call_id)) || message.name || 'tool';
-    return [{ functionResponse: { name, response: { output: chatText(message.content) } } }];
+    return [
+      {
+        functionResponse: {
+          id: message.tool_call_id,
+          name,
+          response: { output: chatText(message.content) },
+        },
+      },
+    ];
   }
 
   const parts: GeminiPart[] = [];
@@ -270,7 +290,11 @@ function convertChatMessage(message: ChatMessage, toolNames: Map<string, string>
 
   for (const call of message.tool_calls ?? []) {
     parts.push({
-      functionCall: { name: call.function.name, args: parseArguments(call.function.arguments) },
+      functionCall: {
+        id: call.id,
+        name: call.function.name,
+        args: parseArguments(call.function.arguments),
+      },
       thoughtSignature: signatureStore.forToolCall(call.id),
     });
   }
