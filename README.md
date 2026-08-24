@@ -1,19 +1,34 @@
-<div align="center">
+<p align="center">
+  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/resources/icon.png" width="112" alt="Antigravity Maestro" />
+</p>
 
-<img src="resources/icon.png" width="96" alt="Antigravity Maestro" />
+<h1 align="center">Antigravity Maestro</h1>
 
-# Antigravity Maestro
+<p align="center">
+  <b>One extension. A pool of Google accounts. Three AI coding agents.</b><br/>
+  Run Antigravity's models in <b>GitHub Copilot Chat</b>, <b>Claude Code</b> and <b>OpenAI Codex</b>,
+  from a pool that rotates itself when a quota runs out.
+</p>
 
-**Run Antigravity's models across Copilot Chat, Claude Code and Codex — from a pool of Google accounts that rotates itself when quota runs out.**
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=husamettinulutas.antigravity-maestro"><img src="https://img.shields.io/visual-studio-marketplace/v/husamettinulutas.antigravity-maestro?color=67E8F9&label=marketplace" alt="Marketplace version" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=husamettinulutas.antigravity-maestro"><img src="https://img.shields.io/visual-studio-marketplace/i/husamettinulutas.antigravity-maestro?color=3FB950&label=installs" alt="Installs" /></a>
+  <a href="https://code.visualstudio.com/"><img src="https://img.shields.io/badge/VS%20Code-%5E1.104-58A6FF" alt="VS Code 1.104+" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A78BFA" alt="MIT license" /></a>
+</p>
 
-[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/husamettinulutas.antigravity-maestro?label=Marketplace&color=0D1117)](https://marketplace.visualstudio.com/items?itemName=husamettinulutas.antigravity-maestro)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/husamettinulutas.antigravity-maestro?color=0D1117)](https://marketplace.visualstudio.com/items?itemName=husamettinulutas.antigravity-maestro)
-[![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.104-0D1117)](https://code.visualstudio.com/)
-[![License](https://img.shields.io/badge/license-MIT-0D1117)](LICENSE)
+<p align="center">
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#models">Models</a> ·
+  <a href="#gateway-api">Gateway API</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#security">Security</a>
+</p>
 
-[Installation](#installation) · [Quick start](#quick-start) · [Models](#models) · [Gateway API](#gateway-api) · [Configuration](#configuration) · [Security](#security)
-
-</div>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/accounts.png" width="820" alt="The Accounts panel: gateway and agent integrations on top, then one card per Google account with its tightest quota and a bar per model family" />
+</p>
 
 ---
 
@@ -65,6 +80,20 @@ Or search for **Antigravity Maestro** in the Extensions view. Requires VS Code 1
 
 **Restore** returns any agent to its own provider. Every config file is copied to
 `<file>.antigravity-maestro-backup` before the first write.
+
+### What the panel shows
+
+The **Accounts** tab stacks the integrations on top, each on its own colour, then one card per
+account. A collapsed card still carries the whole story: the tightest quota as a figure, and one
+bar per model family. Expand it for the per-model breakdown and the rolling 5-hour and weekly
+windows. Drag the cards to set the order rotation falls back down.
+
+The **Usage** tab tracks what the pool actually spent: a quota trend per account, then requests and
+input / thinking / output tokens for every model that answered.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/usage.png" width="820" alt="The Usage tab: a quota trend sparkline per account, then one card per model with its request count and token totals" />
+</p>
 
 ## Models
 

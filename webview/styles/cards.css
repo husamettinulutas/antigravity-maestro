@@ -1,0 +1,801 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Antigravity Maestro — cards: integrations, accounts, quotas, usage, trends.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Pills ───────────────────────────────────────────────────────────────── */
+
+/* One pill component, tinted per meaning. Every status in the panel is one of
+   these, so "what state is this in" always looks the same shape. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill-on {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.3);
+  color: var(--accent-green);
+}
+
+.pill-idle {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+  color: var(--text-muted);
+}
+
+.pill-off {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.28);
+  color: var(--accent-red);
+}
+
+.pill-live {
+  background: rgba(103, 232, 249, 0.12);
+  border-color: rgba(103, 232, 249, 0.32);
+  color: var(--accent-cyan);
+}
+
+.pill-tier {
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.3);
+  color: var(--accent-purple);
+}
+
+.pill-warn {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.32);
+  color: var(--accent-red);
+}
+
+/* Status dots. Flat, and never animated: the panel sits open all day, and a
+   pulsing dot in the corner of the eye is noise, not information. */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: none;
+}
+
+.dot.on   { background: var(--accent-green); }
+.dot.idle { background: var(--accent-yellow); }
+.dot.off  { background: var(--accent-red); opacity: 0.7; }
+
+/* ── Integration cards ───────────────────────────────────────────────────── */
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The coloured left edge is the whole point of this card: it says which agent
+   the row belongs to before a word of it has been read. */
+.agent-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'dot info status'
+    'actions actions actions';
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-left: 3px solid var(--agent-colour, var(--border-primary));
+  border-radius: var(--radius-lg);
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.agent-gateway { --agent-colour: var(--accent-gateway); }
+.agent-copilot { --agent-colour: var(--accent-copilot); }
+.agent-commitMessages { --agent-colour: var(--accent-commit); }
+.agent-claude-code { --agent-colour: var(--accent-claude); }
+.agent-codex { --agent-colour: var(--accent-codex); }
+
+/* An integration that is not installed has no identity to advertise. */
+.agent-card.is-missing {
+  --agent-colour: var(--border-primary);
+  opacity: 0.72;
+}
+
+.agent-card > .dot {
+  grid-area: dot;
+}
+
+.agent-info {
+  grid-area: info;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The gateway URL, and anything else meant to be copied rather than read. */
+.agent-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-status {
+  grid-area: status;
+  justify-self: end;
+}
+
+.agent-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .agent-card:hover {
+    border-color: var(--text-muted);
+    border-left-color: var(--agent-colour, var(--border-primary));
+  }
+}
+
+/* Room for one line again, so put it back on one line. */
+@media (min-width: 560px) {
+  .agent-card {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: 'dot info status actions';
+  }
+
+  .agent-actions {
+    flex-wrap: nowrap;
+  }
+}
+
+/* ── Account cards ───────────────────────────────────────────────────────── */
+
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.account-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* The account actually serving requests. One card carries this at a time, so
+   it is worth the brand colour. */
+.account-card.is-active {
+  border-left-color: var(--accent-cyan);
+  background: linear-gradient(135deg, rgba(103, 232, 249, 0.06), transparent 60%),
+    var(--bg-secondary);
+}
+
+.account-card.is-stale {
+  opacity: 0.75;
+}
+
+.account-card.dragging {
+  opacity: 0.45;
+}
+
+/* Narrow: identity on the first line, buttons on the second. Wide: one line,
+   with the buttons on the right of the figure they act on. */
+.account-head {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'grip chevron avatar info lead'
+    'actions actions actions actions actions';
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.account-head > .grip { grid-area: grip; }
+.account-head > .chevron { grid-area: chevron; }
+.account-head > .avatar { grid-area: avatar; }
+.account-head > .account-info { grid-area: info; }
+
+@media (min-width: 560px) {
+  .account-head {
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas: 'grip chevron avatar info lead actions';
+    gap: var(--space-3);
+  }
+}
+
+.grip {
+  cursor: grab;
+  color: var(--text-muted);
+  opacity: 0.55;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  letter-spacing: -1px;
+  user-select: none;
+}
+
+.account-card.dragging .grip {
+  cursor: grabbing;
+}
+
+.chevron {
+  width: 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+  text-align: center;
+  transition: transform var(--transition-fast);
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  flex: none;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.account-email {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+/* The tightest quota on the account, as a figure rather than a chip. It is
+   the number the card exists to report, so it is sized like one. */
+.account-lead {
+  grid-area: lead;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  justify-self: end;
+}
+
+.lead-value {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.lead-unit {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lead-label {
+  margin-left: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.account-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .account-card:hover {
+    border-color: var(--text-muted);
+  }
+
+  .account-card.is-active:hover {
+    border-left-color: var(--accent-cyan);
+  }
+
+  .account-head:hover {
+    background: rgba(127, 127, 127, 0.06);
+  }
+
+  .account-head:hover .chevron {
+    color: var(--text-primary);
+  }
+}
+
+.error-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(248, 81, 73, 0.08);
+  border-top: 1px solid rgba(248, 81, 73, 0.2);
+  color: var(--accent-red);
+  font-size: var(--font-size-sm);
+}
+
+.error-note::before {
+  content: '!';
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+}
+
+/* ── Quota rows ──────────────────────────────────────────────────────────── */
+
+/* One line per quota pool: family dot, name, bar, figure. This replaces a wrap
+   of long text chips, which cost three lines to say what a bar says in one. */
+.quota-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.quota-group-name {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: var(--space-1);
+}
+
+.quota-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 68px auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.quota-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--family-other);
+}
+
+.fam-claude { background: var(--family-claude); }
+.fam-gemini { background: var(--family-gemini); }
+.fam-gpt    { background: var(--family-gpt); }
+.fam-other  { background: var(--family-other); }
+
+.quota-name {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-bar {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.quota-bar > span,
+.bar > span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: var(--radius-full);
+  transition: width 520ms var(--ease-out);
+}
+
+/* Applied around a silent re-render so the bars do not replay their growth. */
+.instant .quota-bar > span,
+.instant .bar > span {
+  transition: none;
+}
+
+.quota-pct {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  text-align: right;
+}
+
+.quota-good { color: var(--quota-good); }
+.quota-warn { color: var(--quota-warn); }
+.quota-low  { color: var(--quota-low); }
+
+.bar-good { background: var(--quota-good); }
+.bar-warn { background: var(--quota-warn); }
+.bar-low  { background: var(--quota-low); }
+
+/* A sidebar this narrow has no room for a bar and a name both. The figure and
+   the name are the two that cannot be dropped. */
+@media (max-width: 319px) {
+  .quota-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .quota-row .quota-bar {
+    display: none;
+  }
+}
+
+.quota-reset {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* ── Model cards (the expanded per-model breakdown) ──────────────────────── */
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.model-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+}
+
+.model-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.model-card-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-pct {
+  font-size: var(--font-size-base);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.bar {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.model-card-sub {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.model-card-id {
+  font-family: var(--font-mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card-sub > span:last-child {
+  flex: none;
+}
+
+.more {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* ── Usage rows ──────────────────────────────────────────────────────────── */
+
+.usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.usage-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast);
+}
+
+.usage-head {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.usage-model {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-account {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Each count keeps its own colour across the panel, so "which number am I
+   looking at" is answered before the label is read. */
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.metric-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.metric-requests .metric-value { color: var(--text-primary); }
+.metric-input .metric-value    { color: var(--accent-blue); }
+.metric-thinking .metric-value { color: var(--accent-pink); }
+.metric-output .metric-value   { color: var(--accent-green); }
+
+.metric-value.is-zero {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .usage-card:hover {
+    border-color: var(--text-muted);
+  }
+}
+
+/* A sidebar this narrow fits two counts per line, not four. */
+@media (max-width: 319px) {
+  .usage-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Wide enough for one line per record: the head takes the left half and the
+   four counts share the right, aligned into columns down the list. */
+@media (min-width: 560px) {
+  .usage-card {
+    grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr));
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .usage-head {
+    grid-column: auto;
+  }
+
+  .metric {
+    text-align: right;
+  }
+}
+
+/* ── Trend cards ─────────────────────────────────────────────────────────── */
+
+/* auto-fit rather than auto-fill: with two accounts on a wide editor tab,
+   auto-fill still reserved the empty tracks and squeezed both cards down to
+   their minimum, which cut the email short for no reason. The cap keeps a
+   single card from stretching the sparkline across the whole panel. */
+.trends {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
+  justify-content: start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.trends:empty {
+  display: none;
+}
+
+.trend {
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+}
+
+.trend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.trend-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-span {
+  flex: none;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* The chart needs a frame to read as a chart. Without one, three families all
+   sitting at 100% drew a single line that looked like a horizontal rule. */
+.spark-frame {
+  position: relative;
+  border-top: 1px dashed var(--border-primary);
+  border-bottom: 1px solid var(--border-primary);
+  margin-bottom: var(--space-2);
+}
+
+.spark-frame::before {
+  content: '100';
+  position: absolute;
+  top: 2px;
+  right: 0;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 44px;
+}
+
+.spark polyline {
+  fill: none;
+  stroke: var(--family-other);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.spark polyline.spark-claude { stroke: var(--family-claude); }
+.spark polyline.spark-gemini { stroke: var(--family-gemini); }
+.spark polyline.spark-gpt    { stroke: var(--family-gpt); }
+.spark polyline.spark-other  { stroke: var(--family-other); }
+
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.legend .quota-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.legend-value {
+  font-weight: 700;
+}
+
+/* ── Entrance ────────────────────────────────────────────────────────────── */
+
+/* Only on the session's first paint. The lists are rebuilt on every expand,
+   collapse and drop, and replaying this each time made the whole panel look
+   like it was reloading itself every time a card was touched. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.first-paint .account-card,
+.first-paint .agent-card {
+  animation: rise-in 260ms var(--ease-out) both;
+}
+
+.first-paint > :nth-child(2) { animation-delay: 40ms; }
+.first-paint > :nth-child(3) { animation-delay: 80ms; }
+.first-paint > :nth-child(4) { animation-delay: 120ms; }
+.first-paint > :nth-child(n + 5) { animation-delay: 160ms; }

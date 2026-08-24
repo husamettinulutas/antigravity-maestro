@@ -7,88 +7,157 @@
       content="default-src 'none'; img-src {{cspSource}} https: data:; style-src {{cspSource}}; script-src {{cspSource}};"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{variablesCssUri}}" />
     <link rel="stylesheet" href="{{mainCssUri}}" />
+    <link rel="stylesheet" href="{{cardsCssUri}}" />
     <title>Antigravity Maestro</title>
   </head>
   <body>
-    <header class="toolbar">
-      <div class="tabs" role="tablist">
-        <button
-          id="tab-accounts"
-          class="tab active"
-          data-tab="accounts"
-          role="tab"
-          aria-selected="true"
-          aria-controls="accounts-tab"
+    <!--
+      The mark is inlined rather than linked so it can inherit the panel's own
+      gradient tokens and stay crisp at 22px. It is the same figure as
+      resources/logo.svg: a model held up by nothing, over the field it bends.
+    -->
+    <header class="header">
+      <div class="header-left">
+        <svg
+          class="header-logo"
+          width="22"
+          height="22"
+          viewBox="0 0 96 96"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
         >
-          Accounts
-        </button>
-        <button
-          id="tab-usage"
-          class="tab"
-          data-tab="usage"
-          role="tab"
-          aria-selected="false"
-          aria-controls="usage-tab"
-        >
-          Usage
-        </button>
+          <defs>
+            <linearGradient id="agMark" x1="24" y1="16" x2="76" y2="84" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#67E8F9" />
+              <stop offset="1" stop-color="#A78BFA" />
+            </linearGradient>
+          </defs>
+          <circle cx="48" cy="37.6" r="15.6" fill="url(#agMark)" />
+          <path
+            d="M4 62.4L16 62.4C30 62.4 34 73.6 48 73.6C62 73.6 66 62.4 80 62.4L92 62.4"
+            stroke="url(#agMark)"
+            stroke-width="7.5"
+            stroke-linecap="round"
+            opacity="0.8"
+          />
+        </svg>
+        <span class="header-title">Antigravity Maestro</span>
       </div>
-      <div class="toolbar-actions">
-        <button id="collapse-all" class="btn subtle" title="Collapse or expand every account card">Collapse all</button>
-        <button id="refresh-all" class="btn" title="Refresh quotas for every account">Refresh</button>
-        <button id="add-account" class="btn primary">Add account</button>
+
+      <div class="header-actions">
+        <button
+          id="collapse-all"
+          class="btn-icon"
+          aria-label="Collapse or expand every account"
+          title="Collapse or expand every account"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.5 3 8 6.5 11.5 3" />
+            <path d="M4.5 13 8 9.5 11.5 13" />
+          </svg>
+        </button>
+        <button
+          id="refresh-all"
+          class="btn-icon"
+          aria-label="Refresh quotas for every account"
+          title="Refresh quotas for every account"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9" />
+            <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9" />
+            <path d="M12.2 1.6v3h-3" />
+            <path d="M3.8 14.4v-3h3" />
+          </svg>
+        </button>
+        <button
+          id="add-account"
+          class="btn-icon accent"
+          aria-label="Add a Google account"
+          title="Add a Google account"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" />
+          </svg>
+        </button>
       </div>
     </header>
 
+    <nav class="tab-bar" role="tablist">
+      <button
+        id="tab-accounts"
+        class="tab-btn active"
+        data-tab="accounts"
+        role="tab"
+        aria-selected="true"
+        aria-controls="accounts-tab"
+      >
+        Accounts
+        <span class="tab-badge zero" id="accounts-count"></span>
+      </button>
+      <button
+        id="tab-usage"
+        class="tab-btn"
+        data-tab="usage"
+        role="tab"
+        aria-selected="false"
+        aria-controls="usage-tab"
+      >
+        Usage
+        <span class="tab-badge zero" id="usage-count"></span>
+      </button>
+    </nav>
+
     <main>
-      <section id="accounts-tab" class="tab-panel" role="tabpanel" aria-labelledby="tab-accounts">
-        <section id="integrations" class="integrations"></section>
-        <div id="accounts"></div>
-        <div id="empty" class="empty hidden">
-          <img class="brand" src="{{logoUri}}" alt="" />
-          <h2>No accounts yet</h2>
-          <p>
-            Sign in with a Google account to see its Antigravity model quotas and use those models
-            in Copilot Chat, Claude Code and Codex.
-          </p>
-          <button id="add-account-empty" class="btn primary">Add your first account</button>
-        </div>
+      <section id="accounts-tab" role="tabpanel" aria-labelledby="tab-accounts">
+        <section class="section" id="integrations-section">
+          <div class="section-head">
+            <span class="section-title">Integrations</span>
+            <span class="section-meta" id="integrations-meta"></span>
+          </div>
+          <div id="integrations" class="agent-list"></div>
+        </section>
+
+        <section class="section">
+          <div class="section-head" id="accounts-head">
+            <span class="section-title">Accounts</span>
+            <span class="section-meta" id="accounts-meta"></span>
+          </div>
+          <div id="accounts" class="account-list"></div>
+          <div id="empty" class="empty-state hidden">
+            <img class="empty-state-icon" src="{{logoUri}}" alt="" />
+            <div class="empty-state-title">No accounts yet</div>
+            <div class="empty-state-desc">
+              Sign in with a Google account to see its Antigravity model quotas and use those
+              models in Copilot Chat, Claude Code and Codex.
+            </div>
+            <button id="add-account-empty" class="btn btn-primary">Add your first account</button>
+          </div>
+        </section>
       </section>
 
-      <section id="usage-tab" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-usage">
-        <div class="usage-header">
-          <h2>Token usage</h2>
-          <button id="clear-history" class="btn subtle">Clear history</button>
-        </div>
-        <div id="trends" class="trends"></div>
+      <section id="usage-tab" class="hidden" role="tabpanel" aria-labelledby="tab-usage">
+        <section class="section hidden" id="trends-section">
+          <div class="section-head">
+            <span class="section-title">Quota trend</span>
+            <span class="section-meta">lowest remaining per family</span>
+          </div>
+          <div id="trends" class="trends"></div>
+        </section>
 
-        <!--
-          The roles are written out because the stylesheet turns this into a
-          card list below 560px, and an element whose display is no longer
-          table-ish loses its implicit role. Declaring them keeps the table
-          readable to a screen reader at every width.
-        -->
-        <div class="table-wrap">
-          <table class="usage-table" role="table">
-            <thead>
-              <tr role="row">
-                <th role="columnheader" scope="col">Account</th>
-                <th role="columnheader" scope="col">Model</th>
-                <th role="columnheader" scope="col" class="num">Requests</th>
-                <th role="columnheader" scope="col" class="num">Input</th>
-                <th role="columnheader" scope="col" class="num">Thinking</th>
-                <th role="columnheader" scope="col" class="num">Output</th>
-              </tr>
-            </thead>
-            <tbody id="usage-body"></tbody>
-          </table>
-        </div>
-
-        <p id="usage-empty" class="empty-note">
-          No requests recorded yet. Usage appears here once a model answers through Copilot, Claude
-          Code or Codex.
-        </p>
+        <section class="section">
+          <div class="section-head">
+            <span class="section-title">Token usage</span>
+            <button id="clear-history" class="btn btn-sm btn-ghost">Clear history</button>
+          </div>
+          <div id="usage-body" class="usage-list"></div>
+          <p id="usage-empty" class="empty-note">
+            No requests recorded yet. Usage appears here once a model answers through Copilot,
+            Claude Code or Codex.
+          </p>
+        </section>
       </section>
     </main>
 

@@ -269,8 +269,12 @@ export class AccountsViewProvider implements vscode.WebviewViewProvider {
     return html
       .split('{{cspSource}}')
       .join(webview.cspSource)
+      .split('{{variablesCssUri}}')
+      .join(uri('styles', 'variables.css'))
       .split('{{mainCssUri}}')
       .join(uri('styles', 'main.css'))
+      .split('{{cardsCssUri}}')
+      .join(uri('styles', 'cards.css'))
       .split('{{appJsUri}}')
       .join(uri('scripts', 'app.js'))
       .split('{{logoUri}}')

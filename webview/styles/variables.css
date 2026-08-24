@@ -1,0 +1,143 @@
+/* ===== DESIGN TOKENS =====
+   Shared vocabulary with OpenRouter Maestro so the two extensions read as one
+   family. Same surface ramp, same spacing and radius scale, same agent
+   identity colours. What differs is the brand mark: Antigravity's logo runs
+   cyan into violet, so that pair is the accent here.
+
+   The palette is owned rather than inherited from the theme, which is what
+   gives the panel its own presence. A light theme still gets a readable
+   surface ramp from the override at the bottom of this file. */
+:root {
+  /* Background Colors */
+  --bg-primary:     #0D1117;
+  --bg-secondary:   #161B22;
+  --bg-tertiary:    #21262D;
+  --bg-elevated:    #1C2128;
+
+  /* Border Colors */
+  --border-primary:   #30363D;
+  --border-secondary: #21262D;
+
+  /* Accent Colors */
+  --accent-blue:    #58A6FF;
+  --accent-green:   #3FB950;
+  --accent-orange:  #D29922;
+  --accent-purple:  #A78BFA;
+  --accent-red:     #F85149;
+  --accent-cyan:    #67E8F9;
+  --accent-pink:    #F778BA;
+  --accent-yellow:  #E3B341;
+
+  /* Text Colors */
+  --text-primary:   #F0F6FC;
+  --text-secondary: #8B949E;
+  --text-muted:     #6E7681;
+  --text-link:      #58A6FF;
+  --text-on-accent: #0D1117;
+
+  /* Agent identity. One colour per integration row, carried by its left edge,
+     its dot and its status pill, so the list is scannable before it is read. */
+  --accent-gateway: #67E8F9;
+  --accent-copilot: #58A6FF;
+  --accent-commit:  #E3B341;
+  --accent-claude:  #FF8C42;
+  --accent-codex:   #3FB950;
+
+  /* Vendor families, used by the quota rows and the trend sparklines. The two
+     places that plot the same families now agree on their colours. */
+  --family-claude: #FF8C42;
+  --family-gemini: #58A6FF;
+  --family-gpt:    #3FB950;
+  --family-other:  #8B949E;
+
+  /* Quota spectrum */
+  --quota-good: #3FB950;
+  --quota-warn: #E3B341;
+  --quota-low:  #F85149;
+
+  /* Gradients */
+  --gradient-brand: linear-gradient(90deg, #67E8F9 0%, #A78BFA 100%);
+  --gradient-cyan:  linear-gradient(135deg, #67E8F9 0%, #38BDF8 100%);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* Typography. The fallback list lives inside var() on purpose: written
+     outside it, a host that does not define the variable invalidates the whole
+     declaration and the panel drops all the way back to the default serif. */
+  --font-sans: var(--vscode-font-family, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
+  --font-mono: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', ui-monospace, monospace);
+
+  --font-size-xs:   11px;
+  --font-size-sm:   12px;
+  --font-size-base: 13px;
+  --font-size-md:   14px;
+  --font-size-lg:   16px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+
+  /* Border Radius */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-full: 9999px;
+
+  /* Motion. ease-out on anything entering or answering a click; nothing over
+     220ms, because every one of these is seen dozens of times a day. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --transition-fast: 150ms var(--ease-out);
+  --transition-base: 220ms var(--ease-out);
+}
+
+/* A light theme keeps the same structure, hue relationships and identity
+   colours; only the surface ramp and the text ramp invert. Without this the
+   panel would be a black rectangle in the middle of a white editor. */
+body.vscode-light {
+  --bg-primary:     #FFFFFF;
+  --bg-secondary:   #F6F8FA;
+  --bg-tertiary:    #EAEEF2;
+  --bg-elevated:    #FFFFFF;
+
+  --border-primary:   #D0D7DE;
+  --border-secondary: #E4E8EC;
+
+  --text-primary:   #1F2328;
+  --text-secondary: #59636E;
+  --text-muted:     #818B98;
+  --text-on-accent: #FFFFFF;
+
+  --accent-blue:    #0969DA;
+  --accent-green:   #1A7F37;
+  --accent-orange:  #9A6700;
+  --accent-purple:  #8250DF;
+  --accent-red:     #CF222E;
+  --accent-cyan:    #0E7490;
+  --accent-pink:    #BF3989;
+  --accent-yellow:  #9A6700;
+
+  --accent-gateway: #0E7490;
+  --accent-copilot: #0969DA;
+  --accent-commit:  #9A6700;
+  --accent-claude:  #BC4C00;
+  --accent-codex:   #1A7F37;
+
+  --family-claude: #BC4C00;
+  --family-gemini: #0969DA;
+  --family-gpt:    #1A7F37;
+  --family-other:  #59636E;
+
+  --quota-good: #1A7F37;
+  --quota-warn: #9A6700;
+  --quota-low:  #CF222E;
+
+  --gradient-brand: linear-gradient(90deg, #0E7490 0%, #8250DF 100%);
+
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
+  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.12);
+}

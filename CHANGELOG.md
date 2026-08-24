@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.0.0
+
+First public release. Everything below this line is the development history that
+led to it; no version before this one was published.
+
+What the extension does, in one paragraph: sign in with as many Google accounts
+as you have, and Antigravity's models become available in GitHub Copilot Chat,
+Claude Code and OpenAI Codex at once. The panel tracks each account's remaining
+quota per model, serves every request from whichever account can afford it, and
+hands off to the next one when a limit is hit. Refresh tokens live in VS Code
+SecretStorage. Every config file the extension writes is backed up first, and
+**Restore** puts each agent back on its own provider.
+
+Included in this release:
+
+- **Account pool** with automatic rotation, drag-to-reorder fallback order, and
+  per-account quota telemetry: remaining percentage per model, reset countdowns,
+  subscription tier, and both the 5-hour and weekly rolling windows.
+- **Copilot Chat** as a first-class language model provider, in-process, with
+  tool calling, vision, thinking content and prompt caching.
+- **Claude Code and Codex** through a loopback gateway that speaks the Anthropic
+  and OpenAI wire formats, with each agent's own config rewritten to point at it.
+- **Commit messages** on a model of your choosing rather than Copilot credits.
+- **Usage accounting**: requests and input / thinking / output tokens per account
+  and per model, with retained quota history.
+- A panel built on the same design system as OpenRouter Maestro, so the two
+  extensions read as one family. It is responsive from a 250px docked sidebar up
+  to a full editor tab, honours `prefers-reduced-motion`, and follows the
+  editor's light or dark theme.
+
+## 0.1.25
+
+- The panel's font stack survives a host that does not define
+  `--vscode-font-family`. The fallback list sat outside `var()`, so a missing
+  variable invalidated the whole declaration and the panel dropped all the way
+  back to the browser's default serif.
+- An account card's buttons sit on the header line rather than under it, which
+  closes the band of dead space that ran across the middle of every card. On a
+  narrow sidebar they still take their own row.
+- Quota trend cards fill the row they are given. `auto-fill` kept reserving the
+  empty tracks, so two accounts on a wide editor tab were both squeezed to the
+  minimum column width and had their addresses cut short.
+
+## 0.1.24
+
+- The panel is rebuilt on the same design system as OpenRouter Maestro, so the
+  two extensions read as one family: the same surface ramp and spacing scale,
+  the same pill and card shapes, the same agent identity colours. Antigravity's
+  own mark supplies the accent, cyan into violet.
+- It has a brand header now. The mark and the wordmark sit above a tab bar that
+  carries a count on each tab, and the three panel-wide actions moved up there
+  as icon buttons, which is a whole row of the old toolbar reclaimed.
+- Integrations are cards with a coloured left edge, one colour per agent, so
+  the list is scannable before it is read. The gateway URL sits on its own
+  monospace line rather than being appended to the row's title.
+- A collapsed account card leads with its tightest quota as a figure, then one
+  row per model family with a bar and a percentage. It used to be a wrap of
+  long text chips that cost three lines to say what a bar says in one.
+- The quota trend sparkline is fixed. At 100% the line sat exactly on the edge
+  of its viewBox and half the stroke was clipped, so a full account drew what
+  looked like a horizontal rule. The chart has vertical padding and a frame now.
+- Token counts are colour-coded per kind and set in the editor's monospace face,
+  and a light theme gets a matching surface ramp instead of a black rectangle.
+
 ## 0.1.23
 
 - The Input and Thinking columns are visible again. Six columns of a full-width

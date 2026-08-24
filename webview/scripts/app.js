@@ -6,7 +6,7 @@
   let state = { accounts: [], usage: [] };
 
   // Which cards are open, remembered across reloads. Every account starts
-  // collapsed — the pool chips already answer "how much is left", and stacking
+  // collapsed — the quota rows already answer "how much is left", and stacking
   // the cards shut is what makes several accounts readable at once. Bumping the
   // version drops choices made under an older default.
   const STATE_VERSION = 3;
@@ -14,16 +14,21 @@
   const restorable = persisted.stateVersion === STATE_VERSION ? persisted : {};
   const openAccounts = new Set(restorable.openAccounts || []);
   /** Cards and bars animate once, on the first render of a session. */
-  let barsAnimated = false;
+  let firstPaint = true;
   const openModelLists = new Set(restorable.openModelLists || []);
 
   const el = {
     accounts: document.getElementById('accounts'),
+    accountsMeta: document.getElementById('accounts-meta'),
+    accountsCount: document.getElementById('accounts-count'),
     empty: document.getElementById('empty'),
     integrations: document.getElementById('integrations'),
+    integrationsMeta: document.getElementById('integrations-meta'),
+    integrationsSection: document.getElementById('integrations-section'),
     trends: document.getElementById('trends'),
-    usageTable: document.querySelector('.table-wrap'),
+    trendsSection: document.getElementById('trends-section'),
     usageBody: document.getElementById('usage-body'),
+    usageCount: document.getElementById('usage-count'),
     usageEmpty: document.getElementById('usage-empty'),
   };
 
@@ -35,7 +40,7 @@
   document.getElementById('clear-history').addEventListener('click', () => post('clearHistory'));
   document.getElementById('open-logs').addEventListener('click', () => post('openLogs'));
 
-  document.querySelectorAll('.tab').forEach((tab) => {
+  document.querySelectorAll('.tab-btn').forEach((tab) => {
     tab.addEventListener('click', () => selectTab(tab.dataset.tab));
   });
 
@@ -67,7 +72,7 @@
   // is only committed once, on dragend, which fires for a cancelled drag too —
   // and the extension pushes the persisted order straight back.
   el.accounts.addEventListener('dragstart', (event) => {
-    const card = event.target.closest('.account');
+    const card = event.target.closest('.account-card');
     if (!card) {
       return;
     }
@@ -78,14 +83,14 @@
   });
 
   el.accounts.addEventListener('dragover', (event) => {
-    const dragged = el.accounts.querySelector('.account.dragging');
+    const dragged = el.accounts.querySelector('.account-card.dragging');
     if (!dragged) {
       return;
     }
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
 
-    const over = event.target.closest('.account');
+    const over = event.target.closest('.account-card');
     if (!over || over === dragged) {
       return;
     }
@@ -95,19 +100,21 @@
   });
 
   el.accounts.addEventListener('drop', (event) => {
-    if (el.accounts.querySelector('.account.dragging')) {
+    if (el.accounts.querySelector('.account-card.dragging')) {
       event.preventDefault();
     }
   });
 
   el.accounts.addEventListener('dragend', () => {
-    const dragged = el.accounts.querySelector('.account.dragging');
+    const dragged = el.accounts.querySelector('.account-card.dragging');
     if (!dragged) {
       return;
     }
     dragged.classList.remove('dragging');
 
-    const ids = [...el.accounts.querySelectorAll('.account')].map((card) => card.dataset.accountId);
+    const ids = [...el.accounts.querySelectorAll('.account-card')].map(
+      (card) => card.dataset.accountId,
+    );
     const current = state.accounts.map((account) => account.id);
     if (ids.join('|') !== current.join('|')) {
       post('reorderAccounts', { accountIds: ids });
@@ -159,36 +166,45 @@
     renderIntegrations();
     renderAccounts();
     renderUsage();
+    firstPaint = false;
   }
+
+  // ── Integrations ──────────────────────────────────────────────────────────
 
   function renderIntegrations() {
     const status = state.status;
     if (!status) {
       el.integrations.innerHTML = '';
+      el.integrationsSection.classList.add('hidden');
       return;
     }
+    el.integrationsSection.classList.remove('hidden');
 
     // The gateway only matters to tools outside VS Code, so its row says what
-    // it is for rather than assuming the reader knows. The URL goes on its own
-    // line: appended to the name it was the thing that pushed every other row
-    // in this list out of shape.
+    // it is for rather than assuming the reader knows. The URL sits on its own
+    // monospace line: appended to the name, it was the thing that pushed every
+    // other row in this list out of shape.
     const running = status.gateway.running;
-    const gateway = integrationRow({
+    const gateway = agentCard({
+      target: 'gateway',
       dot: running ? 'on' : 'off',
       name: 'Gateway',
-      note: running ? status.gateway.url || '' : 'not running',
+      id: running ? status.gateway.url || '' : '',
       status: running ? 'running' : 'stopped',
       tone: running ? 'on' : 'off',
       title: 'Local endpoint for tools outside VS Code',
       actions:
-        '<button class="btn" data-gateway-action="copyGatewayInfo" title="Copy the base URL and key for a terminal CLI or another tool">Copy URL + key</button>' +
-        '<button class="btn subtle" data-gateway-action="restartGateway" title="Restart the local server if the port changed or requests stopped going through">Restart</button>',
+        '<button class="btn btn-sm" data-gateway-action="copyGatewayInfo" title="Copy the base URL and key for a terminal CLI or another tool">Copy URL + key</button>' +
+        '<button class="btn btn-sm btn-ghost" data-gateway-action="restartGateway" title="Restart the local server if the port changed or requests stopped going through">Restart</button>',
     });
 
+    const live = status.integrations.filter((item) => item.active).length;
     const rows = status.integrations.map(function (item) {
       const target = escapeAttribute(item.target);
       const restorable = item.restorable !== false;
-      return integrationRow({
+      return agentCard({
+        target: item.target,
+        missing: !item.installed,
         dot: item.active ? 'on' : item.installed ? 'idle' : 'off',
         name: item.label,
         status: !item.installed
@@ -199,112 +215,177 @@
         tone: !item.installed ? 'off' : item.active ? 'on' : 'idle',
         title: item.detail || '',
         actions:
-          '<button class="btn" data-agent="' + target + '" data-agent-action="applyAgent">' +
+          '<button class="btn btn-sm" data-agent="' + target + '" data-agent-action="applyAgent">' +
           escapeHtml(item.applyLabel || 'Use model') +
           '</button>' +
           (item.active && restorable
-            ? '<button class="btn subtle" data-agent="' + target + '" data-agent-action="restoreAgent">Restore</button>'
+            ? '<button class="btn btn-sm btn-ghost" data-agent="' +
+              target +
+              '" data-agent-action="restoreAgent">Restore</button>'
             : ''),
       });
     });
 
+    el.integrations.classList.toggle('first-paint', firstPaint);
     el.integrations.innerHTML = gateway + rows.join('');
+    el.integrationsMeta.textContent =
+      live > 0 ? live + ' of ' + status.integrations.length + ' wired up' : 'none wired up yet';
   }
 
   /**
-   * One row of the integrations list, as four independent cells. Below 560px
-   * the stylesheet moves the buttons onto their own line; written as a single
-   * flex line, the name and the status had nothing left to shrink into.
+   * One integration card. The coloured left edge carries the agent's identity,
+   * so the list is scannable before any of it is read; below 560px the buttons
+   * take their own line rather than squeezing the name into an ellipsis.
    */
-  function integrationRow(row) {
+  function agentCard(row) {
+    const classes = [
+      'agent-card',
+      'agent-' + escapeAttribute(row.target),
+      row.missing ? 'is-missing' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
     return (
-      '<div class="integration-row" title="' + escapeAttribute(row.title || '') + '">' +
+      '<article class="' + classes + '" title="' + escapeAttribute(row.title || '') + '">' +
       '<span class="dot ' + row.dot + '"></span>' +
-      '<div class="integration-copy">' +
-      '<span class="integration-name">' + escapeHtml(row.name) + '</span>' +
-      (row.note ? '<span class="integration-note">' + escapeHtml(row.note) + '</span>' : '') +
+      '<div class="agent-info">' +
+      '<span class="agent-name">' + escapeHtml(row.name) + '</span>' +
+      (row.id ? '<span class="agent-id">' + escapeHtml(row.id) + '</span>' : '') +
       '</div>' +
-      '<span class="integration-status ' + row.tone + '">' + escapeHtml(row.status) + '</span>' +
-      '<div class="integration-actions">' + row.actions + '</div>' +
-      '</div>'
+      '<span class="pill pill-' + row.tone + ' agent-status">' + escapeHtml(row.status) + '</span>' +
+      '<div class="agent-actions">' + row.actions + '</div>' +
+      '</article>'
     );
   }
 
+  // ── Accounts ──────────────────────────────────────────────────────────────
+
   function renderAccounts() {
-    el.empty.classList.toggle('hidden', state.accounts.length > 0);
+    const accounts = state.accounts || [];
+    el.empty.classList.toggle('hidden', accounts.length > 0);
     // The cards rise in and the bars grow from zero on the first paint only.
     // Replaying either on every expand, collapse or drop made the whole panel
     // look like it was reloading itself each time a card was touched.
-    el.accounts.classList.toggle('first-paint', !barsAnimated);
-    el.accounts.innerHTML = state.accounts.map(renderAccount).join('');
-    document.getElementById('collapse-all').textContent =
-      openAccounts.size > 0 ? 'Collapse all' : 'Expand all';
-    paintBars(el.accounts, !barsAnimated);
-    barsAnimated = true;
+    el.accounts.classList.toggle('first-paint', firstPaint);
+    el.accounts.innerHTML = accounts.map(renderAccount).join('');
+
+    setBadge(el.accountsCount, accounts.length);
+    const active = accounts.find((account) => account.isActive);
+    el.accountsMeta.textContent = active ? active.email + ' is serving' : '';
+
+    document.getElementById('collapse-all').title =
+      openAccounts.size > 0 ? 'Collapse every account' : 'Expand every account';
+
+    paintBars(el.accounts, firstPaint);
   }
 
   function renderAccount(account) {
-    const badges = [
-      account.isActive ? '<span class="badge active">Active</span>' : '',
-      account.tier ? `<span class="badge">${escapeHtml(account.tier)}</span>` : '',
-      account.needsReauth ? '<span class="badge warn">Sign in again</span>' : '',
+    const open = openAccounts.has(account.id);
+    const tone = quotaTone(account.lowestQuota);
+
+    const pills = [
+      account.needsReauth ? '<span class="pill pill-warn">Sign in again</span>' : '',
+      account.tier ? '<span class="pill pill-tier">' + escapeHtml(account.tier) + '</span>' : '',
+      account.isActive ? '<span class="pill pill-live">Active</span>' : '',
     ].join('');
 
     const updated = account.quotaFetchedAt
-      ? `Updated ${formatTime(account.quotaFetchedAt)}`
+      ? 'Updated ' + formatTime(account.quotaFetchedAt)
       : 'Quota not loaded yet';
 
-    const lowestQuota =
-      account.lowestQuota !== undefined
-        ? `<span class="badge quota-${quotaTone(account.lowestQuota)}">${account.lowestQuota}% min</span>`
-        : '';
+    // The tightest quota on the account, as a figure rather than a chip: it is
+    // the number the collapsed card exists to report.
+    const lead =
+      account.lowestQuota === undefined
+        ? ''
+        : '<div class="account-lead">' +
+          '<span class="lead-value quota-' + tone + '">' + account.lowestQuota + '</span>' +
+          '<span class="lead-unit">%</span>' +
+          '<span class="lead-label">min</span>' +
+          '</div>';
 
     const actions = [
       account.isActive
         ? ''
-        : `<button class="btn" data-action="setActive" data-account-id="${account.id}">Use</button>`,
+        : '<button class="btn btn-sm" data-action="setActive" data-account-id="' +
+          account.id +
+          '">Use</button>',
       account.needsReauth
-        ? `<button class="btn primary" data-action="reauth" data-account-id="${account.id}">Re-auth</button>`
-        : `<button class="btn" data-action="refreshAccount" data-account-id="${account.id}">Refresh</button>`,
-      `<button class="btn danger" data-action="removeAccount" data-account-id="${account.id}">Remove</button>`,
+        ? '<button class="btn btn-sm btn-primary" data-action="reauth" data-account-id="' +
+          account.id +
+          '">Re-auth</button>'
+        : '<button class="btn btn-sm" data-action="refreshAccount" data-account-id="' +
+          account.id +
+          '">Refresh</button>',
+      '<button class="btn btn-sm btn-danger" data-action="removeAccount" data-account-id="' +
+        account.id +
+        '">Remove</button>',
     ].join('');
 
     const avatar = account.picture
-      ? `<img class="avatar" src="${escapeAttribute(account.picture)}" alt="" />`
+      ? '<img class="avatar" src="' + escapeAttribute(account.picture) + '" alt="" />'
       : '<div class="avatar"></div>';
 
-    const open = openAccounts.has(account.id);
+    const classes = [
+      'account-card',
+      account.isActive ? 'is-active' : '',
+      account.needsReauth ? 'is-stale' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
 
-    return `
-      <article class="account ${account.isActive ? 'active' : ''} ${account.needsReauth ? 'stale' : ''}" draggable="true" data-account-id="${account.id}">
-        <div class="account-header ${open ? 'open' : ''}" data-toggle="account" data-account-id="${account.id}" role="button" aria-expanded="${open}" title="${open ? 'Collapse' : 'Expand'} this account">
-          <span class="grip" title="Drag to reorder. Rotation falls back down this list">⠿</span>
-          <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">›</span>
-          ${avatar}
-          <div class="identity">
-            <div class="email">${escapeHtml(account.email)}</div>
-            <div class="meta">${badges}${lowestQuota}<span>${escapeHtml(updated)}</span></div>
-          </div>
-          <div class="account-actions">${actions}</div>
-        </div>
-        ${account.lastError ? `<div class="error-note">${escapeHtml(account.lastError)}</div>` : ''}
-        ${open ? renderAccountBody(account) : renderCollapsedSummary(account)}
-      </article>`;
+    return (
+      '<article class="' + classes + '" draggable="true" data-account-id="' + account.id + '">' +
+      '<header class="account-head" data-toggle="account" data-account-id="' + account.id +
+      '" role="button" aria-expanded="' + open + '" title="' + (open ? 'Collapse' : 'Expand') +
+      ' this account">' +
+      '<span class="grip" title="Drag to reorder. Rotation falls back down this list">⠿</span>' +
+      '<span class="chevron ' + (open ? 'open' : '') + '" aria-hidden="true">›</span>' +
+      avatar +
+      '<div class="account-info">' +
+      '<span class="account-email">' + escapeHtml(account.email) + '</span>' +
+      '<span class="account-sub">' + pills + '<span>' + escapeHtml(updated) + '</span></span>' +
+      '</div>' +
+      lead +
+      // Inside the header, not under it: the delegated handler lets an action
+      // button win over the toggle it sits in, and a separate row left a band
+      // of dead space across the card.
+      '<div class="account-actions">' + actions + '</div>' +
+      '</header>' +
+      (account.lastError
+        ? '<div class="error-note">' + escapeHtml(account.lastError) + '</div>'
+        : '') +
+      (open ? renderAccountBody(account) : renderQuotaSummary(account)) +
+      '</article>'
+    );
   }
 
-  /** Collapsed cards keep the headline numbers — one chip per quota pool. */
-  function renderCollapsedSummary(account) {
+  /**
+   * The collapsed card's body: one row per quota pool, each with a family dot,
+   * a bar and the figure. This replaced a wrap of long text chips, which cost
+   * three lines to say what a bar says in one.
+   */
+  function renderQuotaSummary(account) {
     const pools = account.pools || [];
     if (pools.length === 0) {
       return '';
     }
-    const chips = pools.map(
-      (pool) =>
-        `<span class="group-bucket quota-${quotaTone(pool.model.percentage)}">${escapeHtml(
-          pool.model.displayName || pool.model.modelId,
-        )}: ${pool.model.percentage}%</span>`,
+    const rows = pools.map((pool) => quotaRow(pool.model));
+    return '<div class="quota-list">' + rows.join('') + '</div>';
+  }
+
+  function quotaRow(model) {
+    const tone = quotaTone(model.percentage);
+    const name = model.displayName || model.modelId;
+    return (
+      '<div class="quota-row" title="' + escapeAttribute(model.modelId) + '">' +
+      '<span class="quota-dot fam-' + familyOf(model.modelId) + '"></span>' +
+      '<span class="quota-name">' + escapeHtml(name) + '</span>' +
+      '<span class="quota-bar"><span class="bar-' + tone + '" data-width="' +
+      model.percentage + '"></span></span>' +
+      '<span class="quota-pct quota-' + tone + '">' + model.percentage + '%</span>' +
+      '</div>'
     );
-    return `<div class="groups summary">${chips.join('')}</div>`;
   }
 
   function renderAccountBody(account) {
@@ -322,7 +403,9 @@
       pools.map((pool) => pool.model),
       (model, index) => {
         const extra = pools[index].memberCount - 1;
-        return extra > 0 ? `+${extra} more model${extra === 1 ? '' : 's'} on this quota` : model.modelId;
+        return extra > 0
+          ? '+' + extra + ' more model' + (extra === 1 ? '' : 's') + ' on this quota'
+          : model.modelId;
       },
     );
   }
@@ -335,8 +418,9 @@
     }
     const shown = openModelLists.has(account.id);
     return (
-      `<div class="more"><button class="link" data-toggle="models" data-account-id="${account.id}">` +
-      `${shown ? 'Hide' : 'Show'} all ${models.length} models</button></div>` +
+      '<div class="more"><button class="link" data-toggle="models" data-account-id="' +
+      account.id + '">' + (shown ? 'Hide' : 'Show') + ' all ' + models.length +
+      ' models</button></div>' +
       (shown ? renderModelGrid(models) : '')
     );
   }
@@ -346,48 +430,106 @@
       return '';
     }
     const cards = models.map((model, index) =>
-      renderModel(model, noteFor ? noteFor(model, index) : model.modelId),
+      renderModelCard(model, noteFor ? noteFor(model, index) : model.modelId),
     );
-    return `<div class="model-grid">${cards.join('')}</div>`;
+    return '<div class="model-grid">' + cards.join('') + '</div>';
   }
 
-  function renderModel(model, note) {
+  function renderModelCard(model, note) {
     const tone = quotaTone(model.percentage);
     const name = model.displayName || model.modelId;
-    return `
-      <div class="model" title="${escapeAttribute(model.modelId)}">
-        <div class="model-top">
-          <span class="model-name">${escapeHtml(name)}</span>
-          <span class="model-pct quota-${tone}">${model.percentage}%</span>
-        </div>
-        <div class="bar"><span class="bar-${tone}" data-width="${model.percentage}"></span></div>
-        <div class="model-sub">
-          <span>${escapeHtml(note)}</span>
-          <span>${model.resetsIn ? 'resets in ' + escapeHtml(model.resetsIn) : ''}</span>
-        </div>
-      </div>`;
+    return (
+      '<div class="model-card" title="' + escapeAttribute(model.modelId) + '">' +
+      '<div class="model-card-top">' +
+      '<span class="model-card-name">' + escapeHtml(name) + '</span>' +
+      '<span class="model-card-pct quota-' + tone + '">' + model.percentage + '%</span>' +
+      '</div>' +
+      '<div class="bar"><span class="bar-' + tone + '" data-width="' + model.percentage +
+      '"></span></div>' +
+      '<div class="model-card-sub">' +
+      '<span class="model-card-id">' + escapeHtml(note) + '</span>' +
+      '<span>' + (model.resetsIn ? 'resets in ' + escapeHtml(model.resetsIn) : '') + '</span>' +
+      '</div>' +
+      '</div>'
+    );
   }
 
+  /** The rolling windows (5-hour, weekly), as the same quota rows. */
   function renderGroups(groups) {
     if (!groups || groups.length === 0) {
       return '';
     }
-    const rows = groups
+    const blocks = groups
       .filter((group) => group.buckets.length > 0)
       .map((group) => {
-        const chips = group.buckets.map(
-          (bucket) =>
-            `<span class="group-bucket quota-${quotaTone(bucket.percentage)}">${escapeHtml(
-              bucket.displayName,
-            )}: ${bucket.percentage}%${bucket.resetsIn ? ' · ' + escapeHtml(bucket.resetsIn) : ''}</span>`,
-        );
         const label = group.displayName
-          ? `<span class="group-name" title="${escapeAttribute(group.description || '')}">${escapeHtml(group.displayName)}</span>`
+          ? '<div class="quota-group-name" title="' +
+            escapeAttribute(group.description || '') + '">' +
+            escapeHtml(group.displayName) + '</div>'
           : '';
-        return `<div class="group">${label}${chips.join('')}</div>`;
+        const rows = group.buckets.map((bucket) => {
+          const tone = quotaTone(bucket.percentage);
+          return (
+            '<div class="quota-row">' +
+            '<span class="quota-dot fam-other"></span>' +
+            '<span class="quota-name">' + escapeHtml(bucket.displayName) + '</span>' +
+            '<span class="quota-bar"><span class="bar-' + tone + '" data-width="' +
+            bucket.percentage + '"></span></span>' +
+            '<span class="quota-pct quota-' + tone + '">' + bucket.percentage + '%</span>' +
+            '</div>'
+          );
+        });
+        return label + rows.join('');
       });
-    return `<div class="groups">${rows.join('')}</div>`;
+    return blocks.length > 0 ? '<div class="quota-list">' + blocks.join('') + '</div>' : '';
   }
+
+  // ── Usage ─────────────────────────────────────────────────────────────────
+
+  function renderUsage() {
+    renderTrends();
+    const rows = state.usage || [];
+    el.usageEmpty.classList.toggle('hidden', rows.length > 0);
+    el.usageBody.innerHTML = rows.map(renderUsageCard).join('');
+    setBadge(el.usageCount, rows.length);
+  }
+
+  /**
+   * One usage record. Each count keeps its own colour across the panel, so
+   * which number you are looking at is answered before the label is read, and
+   * the four of them fold to two columns on a sidebar too narrow for four.
+   */
+  function renderUsageCard(row) {
+    const account = state.accounts.find((candidate) => candidate.id === row.accountId);
+    return (
+      '<article class="usage-card">' +
+      '<div class="usage-head">' +
+      '<div class="usage-model">' + escapeHtml(row.modelId) + '</div>' +
+      '<div class="usage-account">' +
+      escapeHtml(account ? account.email : row.accountId) +
+      '</div>' +
+      '</div>' +
+      metric('requests', 'Req', 'requests', row.requests) +
+      metric('input', 'In', 'input tokens', row.inputTokens) +
+      metric('thinking', 'Think', 'thinking tokens', row.thoughtTokens || 0) +
+      metric('output', 'Out', 'output tokens', row.outputTokens) +
+      '</article>'
+    );
+  }
+
+  function metric(kind, label, description, value) {
+    const count = Number(value) || 0;
+    return (
+      '<div class="metric metric-' + kind + '" title="' +
+      escapeAttribute(formatNumber(count) + ' ' + description) + '">' +
+      '<span class="metric-label">' + label + '</span>' +
+      '<span class="metric-value' + (count === 0 ? ' is-zero' : '') + '">' +
+      escapeHtml(formatCompact(count)) + '</span>' +
+      '</div>'
+    );
+  }
+
+  // ── Trends ────────────────────────────────────────────────────────────────
 
   function renderTrends() {
     const series = state.history || [];
@@ -401,27 +543,30 @@
         const families = familiesOf(entry.points);
         return (
           '<div class="trend">' +
+          '<div class="trend-head">' +
           '<span class="trend-name">' + escapeHtml(account.email) + '</span>' +
-          sparkline(entry.points, families) +
+          '<span class="trend-span">' +
+          escapeHtml(formatSpan(entry.points[0].at, latest.at)) +
+          '</span>' +
+          '</div>' +
+          '<div class="spark-frame">' + sparkline(entry.points, families) + '</div>' +
           '<div class="trend-legend">' +
           families
             .map(
               (family) =>
-                '<span class="legend"><i class="dot spark-' + family + '"></i>' +
+                '<span class="legend"><i class="quota-dot fam-' + family + '"></i>' +
                 escapeHtml(familyLabel(family)) +
-                ' <b class="quota-' + quotaTone(latest.byFamily[family]) + '">' +
+                ' <b class="legend-value quota-' + quotaTone(latest.byFamily[family]) + '">' +
                 latest.byFamily[family] + '%</b></span>',
             )
             .join('') +
-          '</div>' +
-          '<div class="trend-foot">lowest quota per family · ' +
-          escapeHtml(formatSpan(entry.points[0].at, latest.at)) +
           '</div></div>'
         );
       })
       .filter(Boolean);
 
     el.trends.innerHTML = cards.join('');
+    el.trendsSection.classList.toggle('hidden', cards.length === 0);
   }
 
   /**
@@ -444,13 +589,32 @@
     return family === 'gpt' ? 'GPT-OSS' : 'Other';
   }
 
-  /** Inline SVG polylines — no external libraries, and CSP-safe. */
+  /** Which family a model id belongs to, for the quota row dots. */
+  function familyOf(modelId) {
+    const id = String(modelId || '').toLowerCase();
+    if (id.includes('claude')) {
+      return 'claude';
+    }
+    if (id.includes('gemini')) {
+      return 'gemini';
+    }
+    return id.includes('gpt') ? 'gpt' : 'other';
+  }
+
+  /**
+   * Inline SVG polylines — no external libraries, and CSP-safe. The vertical
+   * padding matters: at 100% the line sat exactly on the viewBox edge and half
+   * its stroke was clipped away, which is what made a full account look like
+   * it had drawn nothing but a horizontal rule.
+   */
   function sparkline(points, families) {
     const width = 240;
-    const height = 38;
+    const height = 44;
+    const pad = 3;
     const first = points[0].at;
     const span = Math.max(1, points[points.length - 1].at - first);
-    const y = (percentage) => height - (Math.max(0, Math.min(100, percentage)) / 100) * height;
+    const y = (percentage) =>
+      pad + (1 - Math.max(0, Math.min(100, percentage)) / 100) * (height - pad * 2);
 
     const lines = families.map((family) => {
       const coords = points
@@ -466,7 +630,8 @@
     });
 
     return (
-      '<svg class="spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" aria-hidden="true">' +
+      '<svg class="spark" viewBox="0 0 ' + width + ' ' + height +
+      '" preserveAspectRatio="none" aria-hidden="true">' +
       lines.join('') +
       '</svg>'
     );
@@ -481,47 +646,7 @@
     return hours < 48 ? 'last ' + hours + 'h' : 'last ' + Math.round(hours / 24) + 'd';
   }
 
-  function renderUsage() {
-    renderTrends();
-    const rows = state.usage || [];
-    el.usageEmpty.classList.toggle('hidden', rows.length > 0);
-    // An empty table is a header over nothing. The note below it already says
-    // what to do, so the frame goes away until there is something to frame.
-    el.usageTable.classList.toggle('hidden', rows.length === 0);
-    el.usageBody.innerHTML = rows.map(renderUsageRow).join('');
-  }
-
-  /**
-   * One usage record. Each cell names the column it belongs to and the heading
-   * it sits under, because below 560px the stylesheet folds the table into
-   * cards and every number then has to introduce itself.
-   */
-  function renderUsageRow(row) {
-    const account = state.accounts.find((candidate) => candidate.id === row.accountId);
-
-    const text = (column, value) =>
-      '<td role="cell" data-col="' + column + '">' + escapeHtml(value) + '</td>';
-
-    const count = (column, label, heading, value) =>
-      '<td role="cell" class="num" data-col="' + column + '" data-label="' + label + '"' +
-      ' title="' + escapeAttribute(formatNumber(value) + ' ' + heading.toLowerCase()) + '">' +
-      escapeHtml(formatCompact(value)) +
-      '</td>';
-
-    return (
-      '<tr role="row">' +
-      text('account', account ? account.email : row.accountId) +
-      text('model', row.modelId) +
-      // Short labels, because these only appear in the folded card view where
-      // four of them share the width of one sidebar. The table keeps the full
-      // words in its header row.
-      count('requests', 'Req', 'Requests', row.requests) +
-      count('input', 'In', 'Input', row.inputTokens) +
-      count('thinking', 'Think', 'Thinking', row.thoughtTokens || 0) +
-      count('output', 'Out', 'Output', row.outputTokens) +
-      '</tr>'
-    );
-  }
+  // ── Bars ──────────────────────────────────────────────────────────────────
 
   /**
    * Paint the quota bars. Animated, the widths are applied a frame late so the
@@ -551,8 +676,10 @@
     });
   }
 
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+
   function selectTab(name) {
-    document.querySelectorAll('.tab').forEach((tab) => {
+    document.querySelectorAll('.tab-btn').forEach((tab) => {
       const selected = tab.dataset.tab === name;
       tab.classList.toggle('active', selected);
       tab.setAttribute('aria-selected', String(selected));
@@ -565,6 +692,12 @@
 
   function post(type, payload) {
     vscode.postMessage(Object.assign({ type }, payload || {}));
+  }
+
+  /** A count on a tab, hidden entirely at zero rather than shown as "0". */
+  function setBadge(node, count) {
+    node.textContent = count > 0 ? String(count) : '';
+    node.classList.toggle('zero', count === 0);
   }
 
   function quotaTone(percentage) {
@@ -585,7 +718,7 @@
   /**
    * Token counts reach the millions, and on a docked sidebar four of them share
    * one line. Past five figures the number is shortened so the strip stays
-   * readable at a glance; the exact figure rides along in the cell's tooltip.
+   * readable at a glance; the exact figure rides along in the tooltip.
    */
   function formatCompact(value) {
     const count = Number(value) || 0;
