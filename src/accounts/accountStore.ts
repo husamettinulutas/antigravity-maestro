@@ -44,6 +44,23 @@ export class AccountStore {
     await this.upsert({ ...account, ...changes });
   }
 
+  /**
+   * Put the accounts in the given order. Ids that are not in the list keep
+   * their relative order at the end, so an account added while the panel was
+   * being dragged around is never dropped.
+   */
+  async reorder(orderedIds: string[]): Promise<void> {
+    const accounts = this.list();
+    const byId = new Map(accounts.map((account) => [account.id, account]));
+    const moved = orderedIds
+      .map((id) => byId.get(id))
+      .filter((account): account is AccountMetadata => account !== undefined);
+    const movedIds = new Set(moved.map((account) => account.id));
+    const rest = accounts.filter((account) => !movedIds.has(account.id));
+
+    await this.globalState.update(ACCOUNTS_KEY, [...moved, ...rest]);
+  }
+
   async remove(accountId: string): Promise<void> {
     const accounts = this.list().filter((account) => account.id !== accountId);
     await this.globalState.update(ACCOUNTS_KEY, accounts);

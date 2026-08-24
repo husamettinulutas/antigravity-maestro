@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { modelFamily } from './quotaPools';
 import { QuotaSample, QuotaSnapshot, UsageSample } from './types';
 
 const QUOTA_SAMPLES_KEY = 'antigravityMaestro.quotaSamples';
@@ -10,12 +11,23 @@ const MAX_USAGE_SAMPLES = 2000;
 /** Skip a new quota sample when nothing moved and the last one is this recent. */
 const QUOTA_SAMPLE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 
+/** One reading in an account's timeline. */
+export interface TrendPoint {
+  at: number;
+  /** Lowest remaining quota across every model at that moment. */
+  min: number;
+  /** The same, per vendor family — one number per family hides the others. */
+  byFamily: Record<string, number>;
+}
+
 export interface UsageTotals {
   accountId: string;
   modelId: string;
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  /** Thinking tokens, which a thinking model bills as output on top of it. */
+  thoughtTokens: number;
 }
 
 /**
@@ -87,22 +99,27 @@ export class QuotaHistory {
 
   /**
    * Per-account quota timeline: one point per refresh, holding the lowest
-   * remaining quota across that account's models at that moment.
+   * remaining quota across that account's models at that moment — and the same
+   * per vendor family, because a single lowest number reads as the whole
+   * account being spent when it is usually one family that is.
    */
-  series(limitPerAccount = 40): { accountId: string; points: { at: number; min: number }[] }[] {
-    const byAccount = new Map<string, Map<number, number>>();
+  series(limitPerAccount = 40): { accountId: string; points: TrendPoint[] }[] {
+    const byAccount = new Map<string, Map<number, Record<string, number>>>();
 
     for (const sample of this.quotaSamples()) {
-      const points = byAccount.get(sample.accountId) ?? new Map<number, number>();
-      const existing = points.get(sample.at);
-      points.set(sample.at, existing === undefined ? sample.percentage : Math.min(existing, sample.percentage));
+      const points = byAccount.get(sample.accountId) ?? new Map<number, Record<string, number>>();
+      const families = points.get(sample.at) ?? {};
+      const family = modelFamily(sample.modelId);
+      const existing = families[family];
+      families[family] = existing === undefined ? sample.percentage : Math.min(existing, sample.percentage);
+      points.set(sample.at, families);
       byAccount.set(sample.accountId, points);
     }
 
     return [...byAccount.entries()].map(([accountId, points]) => ({
       accountId,
       points: [...points.entries()]
-        .map(([at, min]) => ({ at, min }))
+        .map(([at, byFamily]) => ({ at, min: Math.min(...Object.values(byFamily)), byFamily }))
         .sort((a, b) => a.at - b.at)
         .slice(-limitPerAccount),
     }));
@@ -124,15 +141,19 @@ export class QuotaHistory {
         requests: 0,
         inputTokens: 0,
         outputTokens: 0,
+        thoughtTokens: 0,
       };
       bucket.requests += 1;
       bucket.inputTokens += sample.inputTokens;
       bucket.outputTokens += sample.outputTokens;
+      bucket.thoughtTokens += sample.thoughtTokens ?? 0;
       buckets.set(key, bucket);
     }
 
     return [...buckets.values()].sort(
-      (a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens),
+      (a, b) =>
+        b.inputTokens + b.outputTokens + b.thoughtTokens -
+        (a.inputTokens + a.outputTokens + a.thoughtTokens),
     );
   }
 

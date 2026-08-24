@@ -1,5 +1,6 @@
 import { AccountManager } from '../accounts/accountManager';
 import { AccountMetadata, ModelQuota } from '../accounts/types';
+import { displayNamesFor } from './modelNames';
 
 export type ModelFamily = 'gemini' | 'claude' | 'gpt' | 'image';
 
@@ -17,6 +18,8 @@ export interface CatalogModel {
   supportsTools: boolean;
   /** Remaining quota on the account this catalog was built from. */
   quotaPercent?: number;
+  /** Which account that quota belongs to — the entries merge across accounts. */
+  accountEmail?: string;
   resetTime?: string;
 }
 
@@ -142,17 +145,20 @@ export class ModelCatalog {
 
 function buildModels(account: AccountMetadata): CatalogModel[] {
   const quotas = Object.values(account.quota?.models ?? {});
-  return quotas.map((quota) => toCatalogModel(quota)).sort(compareModels);
+  const names = displayNamesFor(quotas);
+  return quotas
+    .map((quota) => toCatalogModel(quota, account.email, names[quota.modelId]))
+    .sort(compareModels);
 }
 
-function toCatalogModel(quota: ModelQuota): CatalogModel {
+function toCatalogModel(quota: ModelQuota, accountEmail: string, name: string): CatalogModel {
   const id = quota.modelId;
   const spec = MODEL_SPECS[normalizeId(id)];
   const family = familyOf(id);
 
   return {
     id,
-    displayName: quota.displayName?.trim() || id,
+    displayName: name,
     family,
     maxInputTokens: quota.maxTokens && quota.maxTokens > 0 ? quota.maxTokens : defaultContext(family),
     maxOutputTokens:
@@ -165,6 +171,7 @@ function toCatalogModel(quota: ModelQuota): CatalogModel {
     // Image generation models reject tool declarations outright.
     supportsTools: family !== 'image',
     quotaPercent: quota.percentage,
+    accountEmail,
     resetTime: quota.resetTime || undefined,
   };
 }

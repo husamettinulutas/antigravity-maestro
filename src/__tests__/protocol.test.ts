@@ -202,9 +202,86 @@ test('tool schemas drop annotations the upstream has never heard of', () => {
     properties: {
       mode: { type: 'string', enum: ['a', 'b'] },
       paths: { type: 'array', items: { type: 'string' } },
-      limit: { type: 'integer', nullable: true, minimum: 1 },
+      // The null half of the union is dropped outright: carrying it as
+      // `nullable` is OpenAPI, not JSON Schema, and Anthropic rejects the tool
+      // over it once the upstream converts the declaration for Claude.
+      limit: { type: 'integer', minimum: 1 },
     },
   });
+});
+
+test('tool schemas stay valid JSON Schema draft 2020-12', () => {
+  // Everything here is accepted somewhere in Gemini's dialect and rejected by
+  // Anthropic's `input_schema` validation, which is what a Claude request via
+  // the Cloud Code endpoints ends up going through.
+  const sanitized = sanitizeToolSchema({
+    type: 'OBJECT',
+    propertyOrdering: ['path'],
+    properties: {
+      path: { type: 'STRING', nullable: true },
+      depth: { type: 'integer', minimum: '1', maximum: 10 },
+      kind: { type: 'timestamp' },
+      tags: { type: 'array' },
+      mode: { type: 'string', enum: [] },
+      note: { type: 'string', description: { text: 'not a string' } },
+    },
+    required: ['path', 'missing'],
+  });
+
+  assert.deepEqual(sanitized, {
+    type: 'object',
+    properties: {
+      path: { type: 'string' },
+      depth: { type: 'integer', maximum: 10 },
+      // `kind` is gone: an unknown type name is not forwarded, and nothing in
+      // the node says what it should have been.
+      // Gemini rejects an array without `items`, so one is supplied.
+      tags: { type: 'array', items: { type: 'string' } },
+      mode: { type: 'string' },
+      note: { type: 'string' },
+    },
+    required: ['path'],
+  });
+});
+
+test('a union collapses onto the node instead of leaving it untyped', () => {
+  // `edit_notebook_file`, the declaration Copilot sends that the upstream
+  // rejected: `newCode` is a union, so the node itself has no type, and an
+  // untyped node reaches Anthropic as TYPE_UNSPECIFIED and fails the tool.
+  const sanitized = sanitizeToolSchema({
+    type: 'object',
+    properties: {
+      newCode: {
+        anyOf: [
+          { type: 'string', description: 'The code for the cell' },
+          { type: 'array', items: { type: 'string' } },
+        ],
+      },
+      cellId: { description: 'Id of the cell', oneOf: [{ type: 'string' }] },
+      unknowable: { description: 'no type, no shape' },
+    },
+    required: ['newCode', 'unknowable'],
+  });
+
+  assert.deepEqual(sanitized, {
+    type: 'object',
+    properties: {
+      newCode: { type: 'string', description: 'The code for the cell' },
+      // The member brought no description of its own, so the node's is kept.
+      cellId: { type: 'string', description: 'Id of the cell' },
+    },
+    required: ['newCode'],
+  });
+});
+
+test('tool schemas drop required names whose property did not survive', () => {
+  const sanitized = sanitizeToolSchema({
+    type: 'object',
+    properties: { anything: true },
+    required: ['anything'],
+  });
+
+  assert.deepEqual(sanitized, { type: 'object', properties: {} });
 });
 
 test('tool schemas keep properties whose names collide with keywords', () => {

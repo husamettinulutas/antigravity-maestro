@@ -346,13 +346,26 @@ main {
 }
 
 /* The whole header is the toggle, so it needs something that reads as one. */
+/* A caret rather than a glyph that renders as a dot in half the fonts. */
 .chevron {
   flex: none;
   width: 12px;
-  font-size: 10px;
+  font-size: 15px;
   line-height: 1;
+  text-align: center;
   color: var(--vscode-descriptionForeground);
-  transition: color var(--duration) var(--ease);
+  transition:
+    color var(--duration) var(--ease),
+    transform var(--duration) var(--ease);
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+/* Applied around a silent re-render so the bars do not replay their growth. */
+.instant .bar > span {
+  transition: none;
 }
 
 .account-header:hover .chevron {
@@ -674,6 +687,30 @@ main {
   font-weight: 500;
 }
 
+/* ── Reordering ──────────────────────────────────────────────────────────── */
+
+.grip {
+  cursor: grab;
+  opacity: 0.3;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -1px;
+  user-select: none;
+}
+
+.account:hover .grip {
+  opacity: 0.6;
+}
+
+.account.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.account.dragging .grip {
+  cursor: grabbing;
+}
+
 /* ── Quota trend sparklines ──────────────────────────────────────────────── */
 
 .trends {
@@ -731,7 +768,58 @@ main {
   vector-effect: non-scaling-stroke;
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 3px var(--accent-glow));
+}
+
+/* One line per vendor family, matched by the legend dots below the chart. */
+.spark polyline.spark-claude,
+.dot.spark-claude {
+  stroke: #d97757;
+  background: #d97757;
+}
+
+.spark polyline.spark-gemini,
+.dot.spark-gemini {
+  stroke: #4285f4;
+  background: #4285f4;
+}
+
+.spark polyline.spark-gpt,
+.dot.spark-gpt {
+  stroke: #10a37f;
+  background: #10a37f;
+}
+
+.spark polyline.spark-other,
+.dot.spark-other {
+  stroke: var(--vscode-descriptionForeground);
+  background: var(--vscode-descriptionForeground);
+}
+
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 10.5px;
+  margin-bottom: 2px;
+}
+
+.trend-legend .legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.trend-legend b {
+  font-weight: 600;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 3px;
 }
 
 /* ── Empty states + footer ───────────────────────────────────────────────── */

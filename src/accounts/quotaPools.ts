@@ -122,7 +122,8 @@ function pickRepresentative<T extends ModelQuota>(members: T[]): T {
   )[0];
 }
 
-function modelFamily(modelId: string): string {
+/** Vendor family of a model id: 'claude', 'gemini', 'gpt', or 'other'. */
+export function modelFamily(modelId: string): string {
   return FAMILIES.find((family) => family.pattern.test(modelId))?.id ?? 'other';
 }
 

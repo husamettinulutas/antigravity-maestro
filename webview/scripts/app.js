@@ -13,6 +13,8 @@
   const persisted = vscode.getState() || {};
   const restorable = persisted.stateVersion === STATE_VERSION ? persisted : {};
   const openAccounts = new Set(restorable.openAccounts || []);
+  /** The bars animate once, on the first render of a session. */
+  let barsAnimated = false;
   const openModelLists = new Set(restorable.openModelLists || []);
 
   const el = {
@@ -56,6 +58,58 @@
       }
       savePreferences();
       renderAccounts();
+    }
+  });
+
+  // Dragging a card reorders the accounts. The cards move in the DOM while the
+  // drag is in flight so the drop lands where it looks like it will; the order
+  // is only committed once, on dragend, which fires for a cancelled drag too —
+  // and the extension pushes the persisted order straight back.
+  el.accounts.addEventListener('dragstart', (event) => {
+    const card = event.target.closest('.account');
+    if (!card) {
+      return;
+    }
+    card.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    // Some hosts refuse to start a drag with an empty payload.
+    event.dataTransfer.setData('text/plain', card.dataset.accountId);
+  });
+
+  el.accounts.addEventListener('dragover', (event) => {
+    const dragged = el.accounts.querySelector('.account.dragging');
+    if (!dragged) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    const over = event.target.closest('.account');
+    if (!over || over === dragged) {
+      return;
+    }
+    const box = over.getBoundingClientRect();
+    const below = event.clientY > box.top + box.height / 2;
+    el.accounts.insertBefore(dragged, below ? over.nextSibling : over);
+  });
+
+  el.accounts.addEventListener('drop', (event) => {
+    if (el.accounts.querySelector('.account.dragging')) {
+      event.preventDefault();
+    }
+  });
+
+  el.accounts.addEventListener('dragend', () => {
+    const dragged = el.accounts.querySelector('.account.dragging');
+    if (!dragged) {
+      return;
+    }
+    dragged.classList.remove('dragging');
+
+    const ids = [...el.accounts.querySelectorAll('.account')].map((card) => card.dataset.accountId);
+    const current = state.accounts.map((account) => account.id);
+    if (ids.join('|') !== current.join('|')) {
+      post('reorderAccounts', { accountIds: ids });
     }
   });
 
@@ -165,10 +219,11 @@
     el.accounts.innerHTML = state.accounts.map(renderAccount).join('');
     document.getElementById('collapse-all').textContent =
       openAccounts.size > 0 ? 'Collapse all' : 'Expand all';
-    // Defer bar width animation to ensure the transition fires.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => applyBarWidths(el.accounts));
-    });
+    // The bars grow from zero on the first paint only. Replaying that on every
+    // expand, collapse or drop made the whole panel look like it was reloading
+    // itself each time a card was touched.
+    paintBars(el.accounts, !barsAnimated);
+    barsAnimated = true;
   }
 
   function renderAccount(account) {
@@ -204,9 +259,10 @@
     const open = openAccounts.has(account.id);
 
     return `
-      <article class="account ${account.isActive ? 'active' : ''} ${account.needsReauth ? 'stale' : ''}">
+      <article class="account ${account.isActive ? 'active' : ''} ${account.needsReauth ? 'stale' : ''}" draggable="true" data-account-id="${account.id}">
         <div class="account-header ${open ? 'open' : ''}" data-toggle="account" data-account-id="${account.id}" role="button" aria-expanded="${open}" title="${open ? 'Collapse' : 'Expand'} this account">
-          <span class="chevron">${open ? '▾' : '▸'}</span>
+          <span class="grip" title="Drag to reorder — rotation falls back down this list">⠿</span>
+          <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">›</span>
           ${avatar}
           <div class="identity">
             <div class="email">${escapeHtml(account.email)}</div>
@@ -325,14 +381,25 @@
           return '';
         }
         const latest = entry.points[entry.points.length - 1];
+        const families = familiesOf(entry.points);
         return (
           '<div class="trend">' +
           '<div class="trend-head">' +
           '<span class="trend-name">' + escapeHtml(account.email) + '</span>' +
-          '<span class="model-pct quota-' + quotaTone(latest.min) + '">' + latest.min + '%</span>' +
           '</div>' +
-          sparkline(entry.points) +
-          '<div class="trend-foot">lowest model quota · ' +
+          sparkline(entry.points, families) +
+          '<div class="trend-legend">' +
+          families
+            .map(
+              (family) =>
+                '<span class="legend"><i class="dot spark-' + family + '"></i>' +
+                escapeHtml(familyLabel(family)) +
+                ' <b class="quota-' + quotaTone(latest.byFamily[family]) + '">' +
+                latest.byFamily[family] + '%</b></span>',
+            )
+            .join('') +
+          '</div>' +
+          '<div class="trend-foot">lowest quota per family · ' +
           escapeHtml(formatSpan(entry.points[0].at, latest.at)) +
           '</div></div>'
         );
@@ -342,24 +409,51 @@
     el.trends.innerHTML = cards.join('');
   }
 
-  /** Inline SVG polyline — no external libraries, and CSP-safe. */
-  function sparkline(points) {
+  /**
+   * Families a card has readings for, in the order the panel names them. Only
+   * the ones present in the latest point are drawn: a family that stopped
+   * reporting would otherwise leave a line hanging in mid-air.
+   */
+  function familiesOf(points) {
+    const latest = points[points.length - 1].byFamily || {};
+    return ['claude', 'gemini', 'gpt', 'other'].filter((family) => latest[family] !== undefined);
+  }
+
+  function familyLabel(family) {
+    if (family === 'claude') {
+      return 'Claude';
+    }
+    if (family === 'gemini') {
+      return 'Gemini';
+    }
+    return family === 'gpt' ? 'GPT-OSS' : 'Other';
+  }
+
+  /** Inline SVG polylines — no external libraries, and CSP-safe. */
+  function sparkline(points, families) {
     const width = 240;
     const height = 38;
     const first = points[0].at;
     const span = Math.max(1, points[points.length - 1].at - first);
+    const y = (percentage) => height - (Math.max(0, Math.min(100, percentage)) / 100) * height;
 
-    const coords = points
-      .map((point) => {
-        const x = ((point.at - first) / span) * width;
-        const y = height - (Math.max(0, Math.min(100, point.min)) / 100) * height;
-        return x.toFixed(1) + ',' + y.toFixed(1);
-      })
-      .join(' ');
+    const lines = families.map((family) => {
+      const coords = points
+        .filter((point) => point.byFamily && point.byFamily[family] !== undefined)
+        .map(
+          (point) =>
+            (((point.at - first) / span) * width).toFixed(1) +
+            ',' +
+            y(point.byFamily[family]).toFixed(1),
+        )
+        .join(' ');
+      return '<polyline class="spark-' + family + '" points="' + coords + '"></polyline>';
+    });
 
     return (
       '<svg class="spark" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" aria-hidden="true">' +
-      '<polyline points="' + coords + '"></polyline></svg>'
+      lines.join('') +
+      '</svg>'
     );
   }
 
@@ -385,6 +479,7 @@
             <td>${escapeHtml(row.modelId)}</td>
             <td class="num">${row.requests}</td>
             <td class="num">${formatNumber(row.inputTokens)}</td>
+            <td class="num">${formatNumber(row.thoughtTokens || 0)}</td>
             <td class="num">${formatNumber(row.outputTokens)}</td>
           </tr>`;
       })
@@ -392,9 +487,26 @@
   }
 
   /**
+   * Paint the quota bars. Animated, the widths are applied a frame late so the
+   * transition has two values to run between; instant, the transition is turned
+   * off around the write so a re-render lands silently at the same widths.
+   */
+  function paintBars(container, animate) {
+    if (animate) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => applyBarWidths(container));
+      });
+      return;
+    }
+
+    container.classList.add('instant');
+    applyBarWidths(container);
+    requestAnimationFrame(() => container.classList.remove('instant'));
+  }
+
+  /**
    * The webview CSP forbids inline style attributes, so bar widths are applied
-   * through the CSSOM after each render — double rAF ensures the transition
-   * animates from 0% to the target width smoothly.
+   * through the CSSOM after each render.
    */
   function applyBarWidths(container) {
     container.querySelectorAll('[data-width]').forEach((node) => {

@@ -31,10 +31,18 @@ const COPILOT_PUBLISH_KEY = 'antigravityMaestro.copilotPublish';
 const COPILOT_UTILITY_KEY = 'antigravityMaestro.copilotUtilityDefaultSet';
 
 /**
- * Copilot's small utility model — what "Generate Commit Message" and the other
- * background chores run on. Overriding it is what stops those chores from
+ * Copilot's utility models — what "Generate Commit Message" and the other
+ * background chores run on. Overriding them is what stops those chores from
  * spending Copilot credits.
+ *
+ * There are two of them, and which one a given flow uses is decided inside
+ * Copilot: `chat.utilitySmallModel` covers the small/fast flows and
+ * `chat.utilityModel` the rest. Commit messages kept spending Copilot credits
+ * while only the small one was set, so both are written.
  */
+const UTILITY_SETTINGS = ['chat.utilityModel', 'chat.utilitySmallModel'] as const;
+
+/** The one the panel reads back to show what is configured. */
 const UTILITY_SMALL_SETTING = 'chat.utilitySmallModel';
 
 /** The value we wrote there, so restoring only undoes our own edit. */
@@ -94,16 +102,26 @@ export function activate(context: vscode.ExtensionContext): void {
     const utilityModel = utilityOverride
       ? catalog.listAll().find((model) => model.id === utilityOverride.id)
       : undefined;
+    // Copilot resolves the override through `lm.selectChatModels`, so it only
+    // holds while our models are published and the id is still on offer. Both
+    // fail quietly — commit messages go back to Copilot's own quota — so the
+    // row has to say so rather than claim the model is in use.
     const utilityRow = {
       target: 'commitMessages',
       label: 'Commit messages',
       installed: true,
-      active: utilityOverride !== undefined,
+      active: utilityOverride !== undefined && utilityModel !== undefined && publishing,
       modelId: utilityModel?.displayName ?? utilityOverride?.id,
       applyLabel: utilityOverride ? 'Change model' : 'Use model',
-      idleText: 'billed to Copilot',
+      idleText:
+        utilityOverride === undefined
+          ? 'billed to Copilot'
+          : utilityModel === undefined
+            ? 'that model is gone — pick another'
+            : 'models withdrawn from Copilot — pick again',
       detail:
-        'The model behind "Generate Commit Message" and Copilot\'s other background tasks.',
+        'The model behind "Generate Commit Message" and Copilot\'s other background tasks, ' +
+        'chat titles included — a cheap model belongs here.',
     };
 
     return {
@@ -151,6 +169,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.lm.registerLanguageModelChatProvider(CHAT_PROVIDER_VENDOR, chatProvider),
     // Copilot re-reads the model list whenever accounts or quotas change.
     accounts.onDidChange(() => chatProvider.refresh()),
+    // The upstream rotates model ids. A setting naming one that is gone
+    // resolves to nothing and Copilot falls back to its own model without a
+    // word, so re-point it as soon as the catalog moves.
+    accounts.onDidChange(
+      () => void reconcileUtilityModel(catalog, chatProvider, context, accountsView),
+    ),
     gateway.onDidChange(() => {
       void accountsView.postState();
       void seedCodexEnv();
@@ -200,6 +224,11 @@ export function activate(context: vscode.ExtensionContext): void {
   if (accounts.list().length > 0) {
     void accounts.refreshAllQuotas();
   }
+
+  // Stored quota is enough to spot a setting that no longer resolves, and the
+  // withdrawn-models case needs no quota at all — so this does not wait for the
+  // refresh above.
+  void reconcileUtilityModel(catalog, chatProvider, context, accountsView);
 
   Logger.info('Antigravity Maestro activated');
 }
@@ -318,7 +347,7 @@ function registerCommands(context: vscode.ExtensionContext, deps: CommandDeps): 
     restoreCopilot(chatProvider, context, accountsView),
   );
   register('antigravityMaestro.commitMessages.apply', () =>
-    applyUtilityModel(catalog, context, accountsView),
+    applyUtilityModel(catalog, chatProvider, context, accountsView),
   );
   register('antigravityMaestro.commitMessages.restore', () =>
     restoreUtilityModel(context, accountsView),
@@ -398,11 +427,15 @@ async function restoreCopilot(
   chatProvider.setPublished(false);
   await context.globalState.update(COPILOT_PUBLISH_KEY, false);
   await restoreByokUtilityDefault(context);
+  // Withdrawn models cannot resolve, so a utility setting still naming one only
+  // makes Copilot log a failed lookup before falling back. Take that out too.
+  const clearedUtility = await clearUtilityModel(context);
   void accountsView.postState();
 
   vscode.window.showInformationMessage(
     'Copilot Chat restored to its own models. Any Antigravity model still pinned in the picker ' +
-      'will disappear on its next refresh.',
+      'will disappear on its next refresh.' +
+      (clearedUtility ? ' Commit messages are billed to Copilot again.' : ''),
   );
 }
 
@@ -418,27 +451,120 @@ async function restoreCopilot(
  */
 async function applyUtilityModel(
   catalog: ModelCatalog,
+  chatProvider: AntigravityChatProvider,
   context: vscode.ExtensionContext,
   accountsView: AccountsViewProvider,
 ): Promise<void> {
   const model = await pickModel(
     catalog,
-    'Select the model to write commit messages and run Copilot background tasks',
+    'Select the model for commit messages and Copilot background tasks — a cheap one',
   );
   if (!model) {
     return;
   }
 
-  const value = `${CHAT_PROVIDER_VENDOR}/${model.id}`;
-  await vscode.workspace
-    .getConfiguration()
-    .update(UTILITY_SMALL_SETTING, value, vscode.ConfigurationTarget.Global);
-  await context.globalState.update(UTILITY_SMALL_KEY, value);
-  Logger.info(`Set '${UTILITY_SMALL_SETTING}' to '${value}'`);
+  // `lm.selectChatModels` is the only way Copilot can reach the model the
+  // setting names, and it asks this provider for the list. With the models
+  // withdrawn that list is empty, the override resolves to nothing, and commit
+  // messages go on spending Copilot credits — so publishing comes first.
+  if (!chatProvider.isPublishing) {
+    chatProvider.setPublished(true);
+    await context.globalState.update(COPILOT_PUBLISH_KEY, true);
+  }
+
+  await writeUtilityModel(model.id, context);
   void accountsView.postState();
+
+  if (!(await utilityModelResolves(model.id))) {
+    vscode.window.showWarningMessage(
+      `VS Code could not resolve ${model.displayName} for commit messages, so Copilot would fall ` +
+        'back to its own model. Check the Antigravity Maestro logs.',
+    );
+    return;
+  }
 
   vscode.window.showInformationMessage(
     `Commit messages now use ${model.displayName}. Copilot's own credits are no longer spent on them.`,
+  );
+}
+
+/** Point both utility settings at one of our models. */
+async function writeUtilityModel(modelId: string, context: vscode.ExtensionContext): Promise<void> {
+  const value = `${CHAT_PROVIDER_VENDOR}/${modelId}`;
+  const config = vscode.workspace.getConfiguration();
+  for (const setting of UTILITY_SETTINGS) {
+    await config.update(setting, value, vscode.ConfigurationTarget.Global);
+  }
+  await context.globalState.update(UTILITY_SMALL_KEY, value);
+  Logger.info(`Set ${UTILITY_SETTINGS.join(' and ')} to '${value}'`);
+}
+
+/**
+ * Ask VS Code the same question Copilot asks when a commit message is
+ * requested. Anything other than one match is what silently sends the request
+ * back to Copilot's own model, so it is worth catching while the user is here.
+ */
+async function utilityModelResolves(modelId: string): Promise<boolean> {
+  try {
+    const matches = await vscode.lm.selectChatModels({
+      vendor: CHAT_PROVIDER_VENDOR,
+      id: modelId,
+    });
+    if (matches.length !== 1) {
+      Logger.warn(
+        `'${CHAT_PROVIDER_VENDOR}/${modelId}' matched ${matches.length} models — Copilot uses the ` +
+          'utility override only when exactly one matches.',
+      );
+    }
+    return matches.length === 1;
+  } catch (error) {
+    Logger.warn(`Could not resolve '${CHAT_PROVIDER_VENDOR}/${modelId}'`, error);
+    return false;
+  }
+}
+
+/**
+ * Model ids come from live quota data, and the upstream rotates them. Copilot
+ * says nothing when the id in the setting stops resolving — it just bills the
+ * commit message to Copilot — so move the setting onto the nearest model still
+ * on offer.
+ */
+async function reconcileUtilityModel(
+  catalog: ModelCatalog,
+  chatProvider: AntigravityChatProvider,
+  context: vscode.ExtensionContext,
+  accountsView: AccountsViewProvider,
+): Promise<void> {
+  const override = readUtilitySmallModel();
+  if (!override) {
+    return;
+  }
+
+  // A setting naming one of our models is only meaningful while they are on
+  // offer — withdrawing them was what left this state behind, and restoring
+  // Copilot now clears the setting instead.
+  if (!chatProvider.isPublishing) {
+    chatProvider.setPublished(true);
+    await context.globalState.update(COPILOT_PUBLISH_KEY, true);
+    void accountsView.postState();
+  }
+
+  const models = catalog.listAll();
+  // An empty catalog means the quota has not loaded yet, not that the model is
+  // gone; rewriting the setting here would throw away the user's choice.
+  if (models.length === 0 || models.some((model) => model.id === override.id)) {
+    return;
+  }
+
+  const replacement = catalog.resolve(override.id);
+  if (!replacement) {
+    return;
+  }
+
+  await writeUtilityModel(replacement.id, context);
+  void accountsView.postState();
+  vscode.window.showInformationMessage(
+    `'${override.id}' is no longer offered — commit messages now use ${replacement.displayName}.`,
   );
 }
 
@@ -447,21 +573,31 @@ async function restoreUtilityModel(
   context: vscode.ExtensionContext,
   accountsView: AccountsViewProvider,
 ): Promise<void> {
-  const config = vscode.workspace.getConfiguration();
-  const ours = context.globalState.get<string>(UTILITY_SMALL_KEY);
-  const current = config.inspect<string>(UTILITY_SMALL_SETTING)?.globalValue;
-
-  // Left alone if the user has since pointed it somewhere of their own.
-  if (current !== undefined && current === ours) {
-    await config.update(UTILITY_SMALL_SETTING, undefined, vscode.ConfigurationTarget.Global);
-    Logger.info(`Cleared '${UTILITY_SMALL_SETTING}'`);
-  }
-  await context.globalState.update(UTILITY_SMALL_KEY, undefined);
+  await clearUtilityModel(context);
   void accountsView.postState();
 
   vscode.window.showInformationMessage(
     'Commit messages are back on Copilot’s own model, and are billed to Copilot again.',
   );
+}
+
+/** Take our value back out of the utility settings; reports what it removed. */
+async function clearUtilityModel(context: vscode.ExtensionContext): Promise<string | undefined> {
+  const config = vscode.workspace.getConfiguration();
+  const ours = context.globalState.get<string>(UTILITY_SMALL_KEY);
+  let cleared: string | undefined;
+
+  for (const setting of UTILITY_SETTINGS) {
+    // Left alone if the user has since pointed it somewhere of their own.
+    const current = config.inspect<string>(setting)?.globalValue;
+    if (current !== undefined && current === ours) {
+      await config.update(setting, undefined, vscode.ConfigurationTarget.Global);
+      Logger.info(`Cleared '${setting}'`);
+      cleared = ours;
+    }
+  }
+  await context.globalState.update(UTILITY_SMALL_KEY, undefined);
+  return cleared;
 }
 
 /** The model `chat.utilitySmallModel` names, when it names one of ours. */
@@ -606,17 +742,32 @@ async function pickModel(
     return undefined;
   }
 
+  // `listAll` merges the accounts and keeps the best quota for each model, which
+  // is the wrong number to show: the request runs on the active account, and
+  // reading a neighbour's 100% while the active one sits at 17% is how a model
+  // gets picked that is about to run out.
+  const onActive = new Map(catalog.list().map((model) => [model.id, model]));
+
   const picked = await vscode.window.showQuickPick(
     models.map((model) => ({
       label: model.displayName,
       description: model.id,
-      detail: `${model.quotaPercent ?? 0}% quota left · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
+      detail: `${describeQuota(onActive.get(model.id))} · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
       model,
     })),
     { placeHolder, matchOnDescription: true, matchOnDetail: true },
   );
 
   return picked?.model;
+}
+
+/**
+ * What is left on the account the request will run on, and nothing else — a
+ * second account's number next to it read as the quota for the model being
+ * picked, which is the confusion this line exists to avoid.
+ */
+function describeQuota(onActive: CatalogModel | undefined): string {
+  return onActive ? `${onActive.quotaPercent ?? 0}% quota left` : 'not on the active account';
 }
 
 async function pickAccount(
