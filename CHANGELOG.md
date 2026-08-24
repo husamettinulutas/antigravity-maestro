@@ -1,5 +1,172 @@
 # Changelog
 
+## 0.1.21
+
+- The `antigravityMaestro.toolDriverModel` split from 0.1.20 is removed. Moving
+  the tool declarations onto a cheaper model also moved the decision of which
+  tool to call, which in agent work is the part worth paying for. Turns go to
+  the model you picked, whole, as they did before. Trimming unused tool sets in
+  Copilot's Tools picker saves the same tokens without that trade.
+
+## 0.1.19
+
+- Token counters are merged across the response instead of taking the last
+  chunk whole. Gemini stops mentioning a counter once it stops moving — thinking
+  tokens are reported while the model thinks and absent from the chunks after —
+  so the final chunk could erase a figure that had already been reported. The
+  highest value seen for each counter is kept, which is the final one.
+- What the upstream reported is logged at `debug`, so a zero in the usage table
+  can be told apart from a number that never arrived.
+
+## 0.1.18
+
+- The `debug` tool log lists declarations heaviest first, with the size of each.
+  Tool declarations are most of what an agent turn costs — 106KB of a 127KB
+  prompt in one measured case — and the size order is the order worth switching
+  tool sets off in.
+
+## 0.1.17
+
+- The usage table has a Thinking column. Thinking tokens were being recorded but
+  never shown, so a thinking model's Output column read far below what the turn
+  actually produced — 134 output tokens next to several thousand spent thinking.
+  Input and Output are unchanged; the number that was missing is now beside them.
+
+## 0.1.16
+
+- Every request logs what it is made of: `messages=3, tools=20, prompt~51KB
+  (tools 9KB, attachments 0KB)`. A one-word question that costs 50,000 tokens is
+  usually carrying an attached file, and the totals say which part to trim
+  before the next turn.
+
+## 0.1.15
+
+- Choosing a model for commit messages now writes both `chat.utilityModel` and
+  `chat.utilitySmallModel`. VS Code has two utility model settings — one for
+  small/fast background flows, one for the rest — and which of them a flow uses
+  is decided inside Copilot. Only the small one was being set, so
+  "Generate Commit Message" kept running on Copilot's own model and spending
+  Copilot credits. Restore clears each of them, and still only when it holds the
+  value this extension wrote.
+- The picker says what that model is for: it also answers Copilot's other
+  background flows, chat titles included, so a cheap model belongs there.
+
+## 0.1.14
+
+- The model picker shows the quota of the account the request will run on, and
+  nothing else. Printing a second account's percentage and email beside it read
+  as the quota of the model being picked; a model the active account cannot
+  serve now says so instead of borrowing a number.
+- Names follow the Antigravity client again where they can. 0.1.12 derived every
+  name from the model id, which renamed models that were labelled correctly. A
+  label the upstream uses for exactly one model is now kept as-is — that is the
+  name the client shows and the one worth searching for — and only a label
+  shared by several ids (three of them came back as "Gemini 3.1 Flash Lite")
+  falls back to the name derived from the id.
+- Each quota refresh logs, at `debug`, what the upstream offered: model id, the
+  label it came with, the name it is shown under and the percentage left. A
+  model missing from the list is missing from the account's quota response —
+  this is how to tell that apart from one listed under an unexpected name.
+
+## 0.1.13
+
+- The panel no longer looks like it reloads itself every time a card is touched.
+  Quota bars grew from zero on every render, so expanding a card or dropping a
+  dragged account replayed the whole animation. They animate once, on the first
+  paint of a session, and land silently after that.
+- The expand indicator is a caret that rotates when a card opens. It was a
+  glyph that renders as a small dot in most panel fonts, which read as a stray
+  mark next to the drag handle rather than as a control.
+
+## 0.1.12
+
+- Model names are built from the model id instead of the label the upstream
+  reports. Those labels had drifted: three different ids all came back as
+  "Gemini 3.1 Flash Lite", so the list read as duplicates and a model could not
+  be found by name. `gemini-3.5-flash-high` is now **Gemini 3.5 Flash (High)**,
+  `gemini-3.7-flash-tiered` is **Gemini 3.7 Flash (Tiered)**, and
+  `claude-opus-4-6-thinking` is **Claude Opus 4.6 (Thinking)** — in the panel,
+  the status bar and every model picker.
+- Picking a model shows what is left on the account the request will actually
+  run on. The picker merges every account and keeps the best quota per model,
+  and printing that alone read as "100% quota left" while the active account sat
+  at 17%. It now reads `17% quota left · 100% on other@gmail.com`, so a model
+  about to run out is visible before it is chosen.
+- The usage trend is per vendor family. One "lowest model quota" number said 17%
+  for an account whose Gemini models were at 98% — the tightest family stood in
+  for the whole account. Each card now draws a line per family with a legend
+  underneath: Claude 17%, Gemini 98%, GPT-OSS 17%.
+- Accounts can be dragged into a new order in the panel. That order is the order
+  rotation falls back through, so it decides which account backs up which.
+
+## 0.1.11
+
+- Claude models answer again in Copilot Chat. Every request carrying the
+  editor's tools failed with `tools.4.custom.input_schema: JSON schema is
+  invalid`, and tool 4 was `edit_notebook_file`, whose `newCode` argument is
+  declared as a union:
+
+      "newCode": { "anyOf": [ { "type": "string" }, { "type": "array" } ] }
+
+  A union node names no type of its own. Gemini's schema proto defaults an
+  absent type to TYPE_UNSPECIFIED and accepts it, but the conversion the Cloud
+  Code endpoints run for Claude carries that through to Anthropic, which
+  validates the schema and rejects the tool — which is why the same request
+  worked on Gemini models and never on Claude.
+
+  A union now collapses onto the node it was declared on: the first member with
+  a usable type wins and the node keeps its description. `oneOf` collapses the
+  same way instead of being dropped. Nothing untyped is sent any more — a type
+  is otherwise recovered from the node's shape (`properties` → object, `items`
+  → array, a string `enum` → string), an array without `items` gets string
+  elements rather than an open schema, and a node with nothing to recover a
+  type from is dropped along with any `required` entry naming it.
+
+## 0.1.10
+
+- The rejected-tool log added in 0.1.9 never printed: an escape in its pattern
+  had been written as a literal control character, so the pattern matched
+  nothing and a failing request looked exactly like one that sends no tools at
+  all. The pattern is fixed and now covered by a test against the real 400 text.
+- That log no longer stays quiet when there is nothing to dump. It always
+  reports the rejected index, how many declarations went out and their names,
+  and adds the offending schema when the index is one of them — if it is not,
+  the count alone says the tool came from somewhere upstream.
+- The per-request log line carries the tool count: `messages=5, tools=12`.
+
+## 0.1.9
+
+- A tool schema the upstream rejects is now written to the log with the request
+  that failed: `Upstream rejected tool 4 (name): {…}`. The 400 names the tool by
+  index only, which says nothing on its own, and the full declaration list is
+  only logged at `debug` — a level that has to be set before the failure it is
+  meant to explain. If the reported index is past the declarations that were
+  sent, the log says so, because that would mean the rejected tool is not one of
+  this extension's.
+
+## 0.1.8
+
+- Tool calling works again on Claude models in Copilot Chat. A request carrying
+  the editor's tools came back as `HTTP 400 ... tools.N.custom.input_schema:
+  JSON schema is invalid. It must match JSON Schema draft 2020-12`, which
+  killed the whole answer.
+
+  Tool schemas were being filtered into Gemini's dialect, and for Claude the
+  upstream converts that same declaration into Anthropic's `input_schema`,
+  where it is validated as plain JSON Schema. `nullable` (OpenAPI, emitted for
+  a `["string", "null"]` union), `propertyOrdering` (Gemini-only) and anything
+  malformed that used to pass through unchecked — a `type` that is not a JSON
+  Schema type name, a non-numeric `minimum` — are rejected there. Only a tool
+  whose schema happened to contain one was affected, so it failed on some
+  conversations and not others.
+
+  The filter now emits the intersection of both dialects: every keyword is
+  validated, `type` is normalised against the seven JSON Schema type names,
+  `required` is resolved against the properties that survived, and an array
+  declaration always carries `items` — which Gemini needed anyway.
+- Tool declarations are written to the log at `debug` level, with the index the
+  upstream reports on rejection.
+
 ## 0.1.7
 
 - **Commit messages** have a row of their own in the panel: pick the model that

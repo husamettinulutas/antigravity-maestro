@@ -1,6 +1,7 @@
 import { Config } from '../utils/config';
 import { HttpError, postJson } from '../utils/http';
 import { Logger } from '../utils/logger';
+import { displayNamesFor } from '../upstream/modelNames';
 import { currentUserAgent } from '../upstream/userAgent';
 import { ModelQuota, QuotaGroup, QuotaSnapshot } from './types';
 
@@ -210,6 +211,24 @@ function toModelQuotas(models: FetchModelsResponse['models']): Record<string, Mo
       recommended: info.recommended,
     };
   }
+
+  const names = displayNamesFor(Object.values(result));
+  for (const quota of Object.values(result)) {
+    quota.displayName = names[quota.modelId];
+  }
+
+  // What the upstream called each model against what it is shown as — the only
+  // way to tell a model the account cannot serve from one that is listed under
+  // a name you were not looking for.
+  Logger.debug(
+    'Models offered',
+    Object.values(result).map((quota) => ({
+      id: quota.modelId,
+      upstream: models?.[quota.modelId]?.displayName,
+      shown: quota.displayName,
+      percent: quota.percentage,
+    })),
+  );
 
   return result;
 }

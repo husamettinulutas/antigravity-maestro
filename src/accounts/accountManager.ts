@@ -45,6 +45,15 @@ export class AccountManager implements vscode.Disposable {
     return this.list().find((account) => !account.needsReauth) ?? this.list()[0];
   }
 
+  /**
+   * Reorder the accounts. The list order is the order rotation falls back
+   * through, so this is the user setting which account backs up which.
+   */
+  async reorder(orderedIds: string[]): Promise<void> {
+    await this.store.reorder(orderedIds);
+    this.onDidChangeEmitter.fire();
+  }
+
   async setActive(accountId: string): Promise<void> {
     await this.store.setActiveId(accountId);
     this.onDidChangeEmitter.fire();

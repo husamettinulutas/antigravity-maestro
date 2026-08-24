@@ -14,7 +14,7 @@ const resolveFilename = (Module as any)._resolveFilename;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { convertMessages, buildTools } = require('../provider/copilotProvider');
+const { convertMessages, buildTools, rejectedToolIndex } = require('../provider/copilotProvider');
 const vscode = require('vscode');
 
 const { LanguageModelChatMessageRole, LanguageModelTextPart, LanguageModelToolCallPart, LanguageModelToolResultPart } =
@@ -111,4 +111,15 @@ test('copilot: tool declarations are sanitised for Gemini', () => {
 
 test('copilot: no tools means no tool declarations', () => {
   assert.equal(buildTools({ tools: [] } as any), undefined);
+});
+
+test('the rejected tool index is read out of an upstream 400', () => {
+  // The literal shape of the rejection, quotes and all — a regex that misses it
+  // fails silently, and the schema behind the failure stays invisible.
+  const message =
+    'HTTP 400: {"type":"error","error":{"type":"invalid_request_error","message":' +
+    '"tools.4.custom.input_schema: JSON schema is invalid. It must match JSON Schema draft 2020-12"}}';
+
+  assert.equal(rejectedToolIndex(message), 4);
+  assert.equal(rejectedToolIndex('HTTP 429: rate limited'), undefined);
 });

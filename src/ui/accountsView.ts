@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { displayNamesFor } from '../upstream/modelNames';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { AccountManager } from '../accounts/accountManager';
@@ -199,6 +200,9 @@ export class AccountsViewProvider implements vscode.WebviewViewProvider {
         case 'refreshAccount':
           await this.accounts.refreshQuota(message.accountId);
           break;
+        case 'reorderAccounts':
+          await this.accounts.reorder(message.accountIds ?? []);
+          break;
         case 'setActive':
           await this.accounts.setActive(message.accountId);
           break;
@@ -288,8 +292,14 @@ export class AccountsViewProvider implements vscode.WebviewViewProvider {
 }
 
 function toAccountView(account: AccountMetadata, activeId: string | undefined): AccountView {
-  const models = Object.values(account.quota?.models ?? {})
-    .map((model) => ({ ...model, resetsIn: formatResetsIn(model.resetTime) }))
+  const quotas = Object.values(account.quota?.models ?? {});
+  const names = displayNamesFor(quotas);
+  const models = quotas
+    .map((model) => ({
+      ...model,
+      displayName: names[model.modelId],
+      resetsIn: formatResetsIn(model.resetTime),
+    }))
     .sort((a, b) => (a.displayName ?? a.modelId).localeCompare(b.displayName ?? b.modelId));
 
   return {

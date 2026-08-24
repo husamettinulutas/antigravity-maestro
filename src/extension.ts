@@ -31,10 +31,18 @@ const COPILOT_PUBLISH_KEY = 'antigravityMaestro.copilotPublish';
 const COPILOT_UTILITY_KEY = 'antigravityMaestro.copilotUtilityDefaultSet';
 
 /**
- * Copilot's small utility model — what "Generate Commit Message" and the other
- * background chores run on. Overriding it is what stops those chores from
+ * Copilot's utility models — what "Generate Commit Message" and the other
+ * background chores run on. Overriding them is what stops those chores from
  * spending Copilot credits.
+ *
+ * There are two of them, and which one a given flow uses is decided inside
+ * Copilot: `chat.utilitySmallModel` covers the small/fast flows and
+ * `chat.utilityModel` the rest. Commit messages kept spending Copilot credits
+ * while only the small one was set, so both are written.
  */
+const UTILITY_SETTINGS = ['chat.utilityModel', 'chat.utilitySmallModel'] as const;
+
+/** The one the panel reads back to show what is configured. */
 const UTILITY_SMALL_SETTING = 'chat.utilitySmallModel';
 
 /** The value we wrote there, so restoring only undoes our own edit. */
@@ -103,7 +111,8 @@ export function activate(context: vscode.ExtensionContext): void {
       applyLabel: utilityOverride ? 'Change model' : 'Use model',
       idleText: 'billed to Copilot',
       detail:
-        'The model behind "Generate Commit Message" and Copilot\'s other background tasks.',
+        'The model behind "Generate Commit Message" and Copilot\'s other background tasks, ' +
+        'chat titles included — a cheap model belongs here.',
     };
 
     return {
@@ -423,18 +432,19 @@ async function applyUtilityModel(
 ): Promise<void> {
   const model = await pickModel(
     catalog,
-    'Select the model to write commit messages and run Copilot background tasks',
+    'Select the model for commit messages and Copilot background tasks — a cheap one',
   );
   if (!model) {
     return;
   }
 
   const value = `${CHAT_PROVIDER_VENDOR}/${model.id}`;
-  await vscode.workspace
-    .getConfiguration()
-    .update(UTILITY_SMALL_SETTING, value, vscode.ConfigurationTarget.Global);
+  const config = vscode.workspace.getConfiguration();
+  for (const setting of UTILITY_SETTINGS) {
+    await config.update(setting, value, vscode.ConfigurationTarget.Global);
+  }
   await context.globalState.update(UTILITY_SMALL_KEY, value);
-  Logger.info(`Set '${UTILITY_SMALL_SETTING}' to '${value}'`);
+  Logger.info(`Set ${UTILITY_SETTINGS.join(' and ')} to '${value}'`);
   void accountsView.postState();
 
   vscode.window.showInformationMessage(
@@ -449,12 +459,14 @@ async function restoreUtilityModel(
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration();
   const ours = context.globalState.get<string>(UTILITY_SMALL_KEY);
-  const current = config.inspect<string>(UTILITY_SMALL_SETTING)?.globalValue;
 
-  // Left alone if the user has since pointed it somewhere of their own.
-  if (current !== undefined && current === ours) {
-    await config.update(UTILITY_SMALL_SETTING, undefined, vscode.ConfigurationTarget.Global);
-    Logger.info(`Cleared '${UTILITY_SMALL_SETTING}'`);
+  for (const setting of UTILITY_SETTINGS) {
+    // Left alone if the user has since pointed it somewhere of their own.
+    const current = config.inspect<string>(setting)?.globalValue;
+    if (current !== undefined && current === ours) {
+      await config.update(setting, undefined, vscode.ConfigurationTarget.Global);
+      Logger.info(`Cleared '${setting}'`);
+    }
   }
   await context.globalState.update(UTILITY_SMALL_KEY, undefined);
   void accountsView.postState();
@@ -606,17 +618,32 @@ async function pickModel(
     return undefined;
   }
 
+  // `listAll` merges the accounts and keeps the best quota for each model, which
+  // is the wrong number to show: the request runs on the active account, and
+  // reading a neighbour's 100% while the active one sits at 17% is how a model
+  // gets picked that is about to run out.
+  const onActive = new Map(catalog.list().map((model) => [model.id, model]));
+
   const picked = await vscode.window.showQuickPick(
     models.map((model) => ({
       label: model.displayName,
       description: model.id,
-      detail: `${model.quotaPercent ?? 0}% quota left · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
+      detail: `${describeQuota(onActive.get(model.id))} · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
       model,
     })),
     { placeHolder, matchOnDescription: true, matchOnDetail: true },
   );
 
   return picked?.model;
+}
+
+/**
+ * What is left on the account the request will run on, and nothing else — a
+ * second account's number next to it read as the quota for the model being
+ * picked, which is the confusion this line exists to avoid.
+ */
+function describeQuota(onActive: CatalogModel | undefined): string {
+  return onActive ? `${onActive.quotaPercent ?? 0}% quota left` : 'not on the active account';
 }
 
 async function pickAccount(

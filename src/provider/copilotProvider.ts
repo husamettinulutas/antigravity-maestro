@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { AccountLease, LeaseContext } from '../accounts/accountLease';
 import {
+  FunctionDeclaration,
   GeminiContent,
   GeminiPart,
   GeminiRequest,
@@ -103,12 +104,17 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
   ): Promise<void> {
     const abort = new AbortController();
     const cancellation = token.onCancellationRequested(() => abort.abort());
+    let declarations: FunctionDeclaration[] | undefined;
 
     try {
       await this.lease.run(model.id, async (context) => {
         const request = this.buildRequest(messages, options, context, model);
+        declarations = request.tools?.[0]?.functionDeclarations;
+        const size = measureRequest(request);
         Logger.info(
-          `Copilot request: model=${context.model.id}, account=${context.email}, messages=${request.contents.length}`,
+          `Copilot request: model=${context.model.id}, account=${context.email}, ` +
+            `messages=${request.contents.length}, tools=${declarations?.length ?? 0}, ` +
+            `prompt~${size.prompt} (tools ${size.tools}, attachments ${size.attachments})`,
         );
 
         const stream = await this.client.streamGenerate({
@@ -128,6 +134,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       }
       const message = error instanceof Error ? error.message : String(error);
       Logger.error(`Copilot request failed: ${message}`, error);
+      logRejectedTool(message, declarations);
       progress.report(new vscode.LanguageModelTextPart(`\n\n⚠️ ${message}`));
       throw error;
     } finally {
@@ -153,9 +160,12 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     token: vscode.CancellationToken,
   ): Promise<void> {
     let emitted = false;
-    // Gemini repeats the running totals on nearly every chunk, so the last one
-    // seen is the whole request. Recording each of them instead would write the
-    // history to disk hundreds of times per answer and redraw the panel with it.
+    // Gemini repeats the running totals on nearly every chunk, so only the
+    // final figures are recorded — writing each chunk would put the history on
+    // disk hundreds of times per answer and redraw the panel with it. The
+    // fields are merged rather than the last object taken wholesale: a chunk
+    // that omits a counter it reported earlier (thinking tokens stop being
+    // mentioned once the thinking is over) would otherwise erase it.
     let usage: UsageMetadata | undefined;
 
     try {
@@ -169,7 +179,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         }
 
         if (chunk.usageMetadata) {
-          usage = chunk.usageMetadata;
+          usage = mergeUsage(usage, chunk.usageMetadata);
         }
       }
     } catch (error) {
@@ -183,6 +193,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       throw error;
     } finally {
       // Cancelled and failed requests still spent their tokens.
+      Logger.debug('Usage reported by the upstream', usage);
       await this.lease.recordUsage(context, usage);
     }
   }
@@ -376,13 +387,130 @@ export function buildTools(
     return undefined;
   }
 
+  const declarations = tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: sanitizeToolSchema(tool.inputSchema as Record<string, unknown> | undefined),
+  }));
+
+  // Two things this answers. Upstream reports a rejected tool schema by index
+  // only ("tools.4"), which is useless without the list it indexes into — and
+  // the declarations are most of what a turn costs, so they are listed heaviest
+  // first, which is the order worth switching them off in.
+  Logger.debug(
+    'Tool declarations',
+    declarations
+      .map((declaration, index) => ({
+        index,
+        name: declaration.name,
+        bytes: JSON.stringify(declaration).length,
+        parameters: declaration.parameters,
+      }))
+      .sort((a, b) => b.bytes - a.bytes),
+  );
+
+  return { functionDeclarations: declarations };
+}
+
+/**
+ * Upstream names a rejected tool by index only ("tools.4.custom.input_schema"),
+ * which is useless without the list it indexes into — so the declaration it
+ * points at is dumped next to the failure, rather than only at `debug` level on
+ * a run that has to be set up in advance to reproduce the same error.
+ */
+/**
+ * Keep the highest figure reported for each counter. The totals only grow
+ * within a response, so the largest value seen is the final one — and a counter
+ * missing from a later chunk keeps the value it had.
+ */
+function mergeUsage(
+  current: UsageMetadata | undefined,
+  incoming: UsageMetadata,
+): UsageMetadata {
+  if (!current) {
+    return { ...incoming };
+  }
+
+  const merged: UsageMetadata = { ...current };
+  for (const [key, value] of Object.entries(incoming) as [keyof UsageMetadata, unknown][]) {
+    if (typeof value !== 'number') {
+      continue;
+    }
+    const held = merged[key];
+    merged[key] = typeof held === 'number' ? Math.max(held, value) : value;
+  }
+  return merged;
+}
+
+/**
+ * Rough sizes of what a request is made of, so a turn that costs far more than
+ * the question suggests can be traced to the part that carries it — an attached
+ * file, the tool declarations, or the conversation itself. Character counts,
+ * not tokens: the upstream reports the tokens, this says where they came from.
+ */
+function measureRequest(request: GeminiRequest): {
+  prompt: string;
+  tools: string;
+  attachments: string;
+} {
+  const tools = request.tools ? JSON.stringify(request.tools).length : 0;
+  const system = request.systemInstruction ? JSON.stringify(request.systemInstruction).length : 0;
+  const contents = JSON.stringify(request.contents).length;
+
+  // Inline data is base64, so it dwarfs the text around it and is worth its own
+  // number rather than being buried in the conversation total.
+  let attachments = 0;
+  for (const content of request.contents) {
+    for (const part of content.parts ?? []) {
+      const data = (part as { inlineData?: { data?: string } }).inlineData?.data;
+      if (typeof data === 'string') {
+        attachments += data.length;
+      }
+    }
+  }
+
   return {
-    functionDeclarations: tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: sanitizeToolSchema(tool.inputSchema as Record<string, unknown> | undefined),
-    })),
+    prompt: kilobytes(system + contents + tools),
+    tools: kilobytes(tools),
+    attachments: kilobytes(attachments),
   };
+}
+
+function kilobytes(characters: number): string {
+  return `${Math.round(characters / 1024)}KB`;
+}
+
+/** The tool index in a rejection like `tools.4.custom.input_schema: …`. */
+export function rejectedToolIndex(message: string): number | undefined {
+  const match = /tools\.(\d+)\./.exec(message);
+  return match ? Number(match[1]) : undefined;
+}
+
+export function logRejectedTool(
+  message: string,
+  declarations: readonly FunctionDeclaration[] | undefined,
+): void {
+  const index = rejectedToolIndex(message);
+  if (index === undefined) {
+    return;
+  }
+
+  const sent = declarations ?? [];
+  Logger.error(
+    `Upstream rejected tool ${index}; ${sent.length} declarations were sent` +
+      (sent.length > 0 ? `: ${sent.map((entry, at) => `${at}:${entry.name}`).join(', ')}` : ''),
+  );
+
+  const declaration = sent[index];
+  if (!declaration) {
+    // The rejected tool is not one this extension sent, so whatever schema the
+    // 400 is about was added past this point.
+    return;
+  }
+
+  Logger.error(
+    `Rejected tool ${index} (${declaration.name}) schema: ${JSON.stringify(declaration.parameters)}`,
+  );
 }
 
 // ── Part type guards (duck-typed: classes vary across VS Code versions) ───────
