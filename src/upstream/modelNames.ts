@@ -28,7 +28,7 @@ export function displayNamesFor(
 ): Record<string, string> {
   const uses = new Map<string, number>();
   for (const model of models) {
-    const label = model.displayName?.trim();
+    const label = model.displayName?.trim() || undefined;
     if (label) {
       uses.set(label, (uses.get(label) ?? 0) + 1);
     }
@@ -36,7 +36,7 @@ export function displayNamesFor(
 
   const names: Record<string, string> = {};
   for (const model of models) {
-    const label = model.displayName?.trim();
+    const label = model.displayName?.trim() || undefined;
     if (label && uses.get(label) === 1) {
       names[model.modelId] = label;
       continue;

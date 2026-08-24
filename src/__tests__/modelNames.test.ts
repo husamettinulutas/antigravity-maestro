@@ -74,3 +74,12 @@ test('a shared label still falls back to the name derived from the id', () => {
   assert.equal(names['gemini-2.5-flash'], 'Gemini 2.5 Flash');
   assert.equal(names['gemini-3.1-flash-lite'], 'Gemini 3.1 Flash Lite');
 });
+
+test('empty or whitespace displayName falls back to modelId when unrecognisable', () => {
+  const names = displayNamesFor([
+    { modelId: 'models/', displayName: '   ' },
+    { modelId: '', displayName: ' ' },
+  ]);
+  assert.equal(names['models/'], 'models/');
+  assert.equal(names[''], '');
+});

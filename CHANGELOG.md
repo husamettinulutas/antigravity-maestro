@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.6
+
+- **Empty or whitespace display names correctly fall back to the model id.** When
+  an upstream model object reported an empty or whitespace-only `displayName` and
+  no derived name was recognised, nullish coalescing stopped at the empty string
+  instead of falling back to the authoritative `modelId`. Empty display names are
+  now treated as undefined, allowing the fallback chain to complete properly.
+
 ## 1.0.5
 
 - **The model id is no longer appended to the name.** 1.0.3 added it where the
