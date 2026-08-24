@@ -13,8 +13,26 @@
   <body>
     <header class="toolbar">
       <div class="tabs" role="tablist">
-        <button class="tab active" data-tab="accounts" role="tab">Accounts</button>
-        <button class="tab" data-tab="usage" role="tab">Usage</button>
+        <button
+          id="tab-accounts"
+          class="tab active"
+          data-tab="accounts"
+          role="tab"
+          aria-selected="true"
+          aria-controls="accounts-tab"
+        >
+          Accounts
+        </button>
+        <button
+          id="tab-usage"
+          class="tab"
+          data-tab="usage"
+          role="tab"
+          aria-selected="false"
+          aria-controls="usage-tab"
+        >
+          Usage
+        </button>
       </div>
       <div class="toolbar-actions">
         <button id="collapse-all" class="btn subtle" title="Collapse or expand every account card">Collapse all</button>
@@ -24,7 +42,7 @@
     </header>
 
     <main>
-      <section id="accounts-tab" class="tab-panel">
+      <section id="accounts-tab" class="tab-panel" role="tabpanel" aria-labelledby="tab-accounts">
         <section id="integrations" class="integrations"></section>
         <div id="accounts"></div>
         <div id="empty" class="empty hidden">
@@ -38,25 +56,35 @@
         </div>
       </section>
 
-      <section id="usage-tab" class="tab-panel hidden">
+      <section id="usage-tab" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-usage">
         <div class="usage-header">
           <h2>Token usage</h2>
           <button id="clear-history" class="btn subtle">Clear history</button>
         </div>
         <div id="trends" class="trends"></div>
-        <table class="usage-table">
-          <thead>
-            <tr>
-              <th>Account</th>
-              <th>Model</th>
-              <th class="num">Requests</th>
-              <th class="num">Input</th>
-              <th class="num">Thinking</th>
-              <th class="num">Output</th>
-            </tr>
-          </thead>
-          <tbody id="usage-body"></tbody>
-        </table>
+
+        <!--
+          The roles are written out because the stylesheet turns this into a
+          card list below 560px, and an element whose display is no longer
+          table-ish loses its implicit role. Declaring them keeps the table
+          readable to a screen reader at every width.
+        -->
+        <div class="table-wrap">
+          <table class="usage-table" role="table">
+            <thead>
+              <tr role="row">
+                <th role="columnheader" scope="col">Account</th>
+                <th role="columnheader" scope="col">Model</th>
+                <th role="columnheader" scope="col" class="num">Requests</th>
+                <th role="columnheader" scope="col" class="num">Input</th>
+                <th role="columnheader" scope="col" class="num">Thinking</th>
+                <th role="columnheader" scope="col" class="num">Output</th>
+              </tr>
+            </thead>
+            <tbody id="usage-body"></tbody>
+          </table>
+        </div>
+
         <p id="usage-empty" class="empty-note">
           No requests recorded yet. Usage appears here once a model answers through Copilot, Claude
           Code or Codex.

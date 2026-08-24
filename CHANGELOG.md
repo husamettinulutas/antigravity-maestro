@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.23
+
+- The Input and Thinking columns are visible again. Six columns of a full-width
+  table never fit a docked sidebar, and the body hid the overflow rather than
+  scrolling it, so the right-hand counts left the panel with no way to reach
+  them. The table now sits in its own scroll container, and below 560px it
+  stops being a table at all: each record folds into a card with the model on
+  top and the four counts as a labelled strip underneath. Counts past five
+  figures are shortened, with the exact figure in the cell's tooltip.
+- Account cards and integration rows stop colliding with themselves. Both were
+  a single non-wrapping row carrying five things, so on a 250px sidebar the
+  three buttons squeezed the email down to an ellipsis. Both are grids now, and
+  the buttons drop to their own line when there is no room for them beside the
+  name. The gateway URL moved onto its own line for the same reason: appended
+  to the row's title, it was what pushed the rest of the list out of shape.
+- Colour comes from the running theme. The panel had a hardcoded indigo accent
+  and a neon quota palette tuned for dark backgrounds; it now reads
+  `focusBorder` and the theme's chart colours, so a light theme gets a green it
+  can actually show.
+- The card list animates in once per session instead of on every render. The
+  list is rebuilt whenever a card is expanded, collapsed or dropped, and
+  replaying the entrance each time made the panel look like it was reloading
+  itself on every click.
+- Interaction polish: buttons answer a press, keyboard focus is visible on
+  every control, the status dots stopped pulsing, and the outer glows are gone.
+  `prefers-reduced-motion` is honoured, and hover effects no longer fire on
+  touch input.
+
 ## 0.1.22
 
 - The commit-message model is applied for real. Copilot resolves

@@ -1,37 +1,57 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Antigravity Maestro – Premium UI
+   Antigravity Maestro panel
+
+   Written narrow-first. The sidebar is the common home for this view and it
+   can be dragged down to about 250px, so every layout starts stacked and only
+   opens out into rows once there is room. Two breakpoints, nothing else:
+
+     base          the sidebar. Headers stack, the usage table becomes cards.
+     >= 560px      wide sidebar or the editor tab. Single-row headers, real table.
+     >= 900px      the editor tab at full width. Roomier padding and grids.
+
+   Shape lock: containers 12px, items inside them 8px, controls 6px, and only
+   chips and badges are full-round. Nothing else invents a radius.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --gap: 14px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  /* Rhythm */
+  --pad-x: 14px;
+  --pad-y: 12px;
+  --gap: 10px;
 
-  /* Accent palette */
-  --accent-h: 230;
-  --accent: hsl(var(--accent-h), 88%, 62%);
-  --accent-glow: hsla(var(--accent-h), 90%, 60%, 0.35);
-  --accent-subtle: hsla(var(--accent-h), 80%, 60%, 0.12);
+  /* Shape */
+  --r-card: 12px;
+  --r-item: 8px;
+  --r-control: 6px;
+  --r-pill: 999px;
 
-  /* Quota spectrum */
-  --quota-good: #34d399;
-  --quota-good-glow: rgba(52, 211, 153, 0.25);
-  --quota-warn: #fbbf24;
-  --quota-warn-glow: rgba(251, 191, 36, 0.25);
-  --quota-low: #f87171;
-  --quota-low-glow: rgba(248, 113, 113, 0.25);
+  /* Colour comes from the running theme, so the panel never fights the editor
+     it is docked into. Fallbacks are only there for hosts missing a token. */
+  --fg: var(--vscode-foreground);
+  --fg-muted: var(--vscode-descriptionForeground);
+  --accent: var(--vscode-focusBorder, #3794ff);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 55%, transparent);
 
-  /* Surface layers */
-  --surface-0: var(--vscode-editor-background);
-  --surface-1: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.06));
-  --surface-2: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.1));
-  --surface-glass: rgba(128, 128, 128, 0.05);
-  --border: var(--vscode-panel-border);
-  --border-subtle: rgba(128, 128, 128, 0.12);
+  --surface-0: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --surface-1: rgba(127, 127, 127, 0.06);
+  --surface-2: rgba(127, 127, 127, 0.12);
+  --border: var(--vscode-panel-border, rgba(127, 127, 127, 0.24));
+  --border-subtle: rgba(127, 127, 127, 0.16);
 
-  /* Timing */
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --duration: 0.25s;
+  /* Quota spectrum, taken from the theme's chart colours so a light theme gets
+     readable greens instead of the neon set that only worked on dark. */
+  --quota-good: var(--vscode-charts-green, #3fb950);
+  --quota-warn: var(--vscode-charts-yellow, #d29922);
+  --quota-low: var(--vscode-charts-red, #f85149);
+
+  /* Motion. ease-out for anything entering or answering a click, because it
+     moves on the first frame the user is watching. Nothing here runs past
+     220ms except the quota bars, which are a data reveal rather than a
+     response to input. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --press: 120ms;
+  --quick: 160ms;
 }
 
 * {
@@ -43,8 +63,8 @@
 body {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
-  color: var(--vscode-foreground);
-  background: var(--surface-0);
+  color: var(--fg);
+  background: var(--vscode-editor-background);
   line-height: 1.5;
   overflow-x: hidden;
 }
@@ -53,145 +73,157 @@ body {
   display: none !important;
 }
 
+/* Every number here is read by comparing it to the number above it. */
+.num,
+.model-pct,
+.trend-legend b {
+  font-variant-numeric: tabular-nums;
+}
+
+/* One focus ring, declared once, so keyboard users get the same affordance on
+   every control instead of the browser default on some and nothing on others. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-control);
+}
+
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 
 .toolbar {
   position: sticky;
   top: 0;
-  z-index: 10;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: var(--surface-0);
+  z-index: 2;
+  display: grid;
+  gap: var(--gap);
+  padding: 10px var(--pad-x);
+  background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--border-subtle);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .tabs {
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
-  background: var(--surface-glass);
+  border-radius: var(--r-pill);
+  background: var(--surface-1);
   border: 1px solid var(--border-subtle);
+  justify-self: start;
 }
 
 .tab {
+  position: relative;
   padding: 5px 16px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: transparent;
-  color: var(--vscode-descriptionForeground);
+  color: var(--fg-muted);
   cursor: pointer;
+  font-family: inherit;
   font-size: 11.5px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  transition: all var(--duration) var(--ease);
-  position: relative;
-}
-
-.tab:hover {
-  color: var(--vscode-foreground);
+  transition:
+    color var(--quick) var(--ease-out),
+    background var(--quick) var(--ease-out);
 }
 
 .tab.active {
+  background: var(--surface-2);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* A thin accent rule under the active segment. The surface change on its own
+   reads as "hovered" in some themes; the rule makes it read as "selected". */
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 3px;
+  height: 2px;
+  border-radius: var(--r-pill);
   background: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 8px var(--accent-glow);
 }
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
-  flex: 1;
-  justify-content: flex-end;
-  min-width: 200px;
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 
 .btn {
-  padding: 5px 14px;
+  padding: 5px 12px;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--surface-glass);
-  color: var(--vscode-foreground);
+  border-radius: var(--r-control);
+  background: var(--surface-1);
+  color: var(--fg);
   cursor: pointer;
+  font-family: inherit;
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: all var(--duration) var(--ease);
-  position: relative;
-  overflow: hidden;
+  transition:
+    background var(--quick) var(--ease-out),
+    border-color var(--quick) var(--ease-out),
+    color var(--quick) var(--ease-out),
+    transform var(--press) var(--ease-out);
 }
 
-.btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.04), transparent);
-  opacity: 0;
-  transition: opacity var(--duration) var(--ease);
-}
-
-.btn:hover {
-  border-color: var(--border);
-  background: var(--surface-2);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.btn:hover::before {
-  opacity: 1;
-}
-
-.btn:active {
-  transform: translateY(0);
-  box-shadow: none;
+/* Press feedback is the one animation every button gets. It is what makes a
+   click feel heard, and it costs nothing on a panel refreshed this often. */
+.btn:active,
+.link:active {
+  transform: scale(0.97);
 }
 
 .btn.primary {
-  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 20), 80%, 55%));
-  color: #fff;
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
   border-color: transparent;
   font-weight: 600;
-  box-shadow: 0 2px 10px var(--accent-glow);
-}
-
-.btn.primary:hover {
-  box-shadow: 0 4px 16px var(--accent-glow);
-  transform: translateY(-1px);
-  filter: brightness(1.08);
 }
 
 .btn.subtle {
   background: transparent;
-  color: var(--vscode-descriptionForeground);
-  border: 1px solid var(--border-subtle);
-}
-
-.btn.subtle:hover {
-  color: var(--vscode-foreground);
-  border-color: var(--border);
+  color: var(--fg-muted);
 }
 
 .btn.danger {
-  color: var(--vscode-descriptionForeground);
+  color: var(--fg-muted);
 }
 
-.btn.danger:hover {
-  background: rgba(248, 113, 113, 0.12);
-  border-color: var(--quota-low);
-  color: var(--quota-low);
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    color: var(--fg);
+  }
+
+  .btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+  }
+
+  .btn.primary:hover {
+    background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+  }
+
+  .btn.subtle:hover {
+    color: var(--fg);
+    border-color: var(--border);
+  }
+
+  .btn.danger:hover {
+    color: var(--quota-low);
+    border-color: var(--quota-low);
+    background: transparent;
+  }
 }
 
 main {
-  padding: 16px;
+  padding: var(--pad-y) var(--pad-x) 4px;
 }
 
 /* ── Gateway + agent integrations ────────────────────────────────────────── */
@@ -199,201 +231,201 @@ main {
 .integrations {
   display: flex;
   flex-direction: column;
-  gap: 1px;
   margin-bottom: var(--gap);
-  border-radius: var(--radius-lg);
+  border-radius: var(--r-card);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  background: var(--border-subtle);
-}
-
-.integration-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  font-size: 12px;
   background: var(--surface-1);
-  transition: background var(--duration) var(--ease);
 }
 
-.integration-row:hover {
-  background: var(--surface-2);
+.integrations:empty {
+  display: none;
+}
+
+.integration-row + .integration-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Narrow: identity and status on the first line, the buttons on their own.
+   Cramming five things into one row is what made this list unreadable in a
+   docked sidebar, and shrinking the text was never going to fix it. */
+.integration-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'dot copy status'
+    'actions actions actions';
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.integration-row > .dot {
+  grid-area: dot;
+}
+
+.integration-copy {
+  grid-area: copy;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .integration-name {
   font-weight: 600;
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.integration-state {
-  flex: 1;
-  color: var(--vscode-descriptionForeground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
 }
 
-.integration-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
+/* The gateway URL. Monospace because it is a value to be copied, not prose. */
+.integration-note {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* What the row is doing right now, coloured the way its dot is. */
-.integration-status-label {
+.integration-status {
+  grid-area: status;
+  justify-self: end;
+  max-width: 100%;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-size: 10.5px;
   font-weight: 500;
   border: 1px solid var(--border-subtle);
-  background: var(--surface-glass);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.integration-status-label.on {
+.integration-status.on {
   color: var(--quota-good);
-  border-color: var(--quota-good-glow);
+  border-color: var(--quota-good);
 }
 
-.integration-status-label.idle {
-  color: var(--vscode-descriptionForeground);
+.integration-status.off {
+  opacity: 0.75;
 }
 
-.integration-status-label.off {
-  color: var(--quota-low);
-  border-color: var(--quota-low-glow);
+.integration-actions {
+  grid-area: actions;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
-/* Status dots with glow */
+/* Status dots. Flat, and never animated: this panel sits open all day, and a
+   pulsing dot in the corner of the eye is noise, not information. */
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
-  margin-right: 6px;
-  background: var(--vscode-descriptionForeground);
-  flex-shrink: 0;
-  transition: all var(--duration) var(--ease);
+  background: var(--fg-muted);
+  flex: none;
 }
 
 .dot.on {
   background: var(--quota-good);
-  box-shadow: 0 0 6px var(--quota-good-glow), 0 0 12px var(--quota-good-glow);
-  animation: pulse-dot 2.5s ease-in-out infinite;
 }
 
 .dot.idle {
   background: var(--quota-warn);
-  box-shadow: 0 0 4px var(--quota-warn-glow);
 }
 
 .dot.off {
   background: var(--quota-low);
-  opacity: 0.7;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { box-shadow: 0 0 6px var(--quota-good-glow), 0 0 12px var(--quota-good-glow); }
-  50% { box-shadow: 0 0 10px var(--quota-good-glow), 0 0 20px var(--quota-good-glow); }
+  opacity: 0.65;
 }
 
 /* ── Account cards ───────────────────────────────────────────────────────── */
 
 .account {
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: var(--r-card);
   margin-bottom: var(--gap);
   overflow: hidden;
-  transition: all var(--duration) var(--ease);
   background: var(--surface-0);
-}
-
-.account:hover {
-  border-color: var(--border);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  transition: border-color var(--quick) var(--ease-out);
 }
 
 .account.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-subtle), 0 4px 20px rgba(0, 0, 0, 0.06);
+  border-color: var(--accent-line);
 }
 
 .account.active .account-header {
-  background: linear-gradient(135deg, var(--accent-subtle), transparent 70%);
+  background: var(--accent-soft);
 }
 
 .account.stale {
-  opacity: 0.7;
+  opacity: 0.72;
 }
 
+/* Same story as the integration rows: grip, chevron, avatar, identity and
+   three buttons do not share a 250px line. Below 560px the buttons take their
+   own row, which costs one line of height and buys back the whole email. */
 .account-header {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    'grip chevron avatar identity'
+    'actions actions actions actions';
   align-items: center;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 12px var(--pad-x);
   background: var(--surface-1);
-  transition: background var(--duration) var(--ease);
   cursor: pointer;
+  user-select: none;
+  transition: background var(--quick) var(--ease-out);
+}
+
+.grip {
+  grid-area: grip;
+  cursor: grab;
+  opacity: 0.35;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -1px;
   user-select: none;
 }
 
-.account-header:hover {
-  background: var(--surface-2);
-}
-
-/* The whole header is the toggle, so it needs something that reads as one. */
-/* A caret rather than a glyph that renders as a dot in half the fonts. */
 .chevron {
-  flex: none;
+  grid-area: chevron;
   width: 12px;
   font-size: 15px;
   line-height: 1;
   text-align: center;
-  color: var(--vscode-descriptionForeground);
-  transition:
-    color var(--duration) var(--ease),
-    transform var(--duration) var(--ease);
+  color: var(--fg-muted);
+  transition: transform var(--quick) var(--ease-out);
 }
 
 .chevron.open {
   transform: rotate(90deg);
 }
 
-/* Applied around a silent re-render so the bars do not replay their growth. */
-.instant .bar > span {
-  transition: none;
-}
-
-.account-header:hover .chevron {
-  color: var(--vscode-foreground);
-}
-
 .avatar {
-  width: 34px;
-  height: 34px;
+  grid-area: avatar;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 40), 70%, 60%));
-  flex: none;
-  border: 2px solid var(--border-subtle);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   object-fit: cover;
-  transition: all var(--duration) var(--ease);
-}
-
-.account:hover .avatar {
-  border-color: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .identity {
+  grid-area: identity;
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
-  flex: 1;
 }
 
 .email {
@@ -410,100 +442,96 @@ main {
   align-items: center;
   flex-wrap: wrap;
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
-}
-
-/* Badges with gradient highlights */
-.badge {
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background: var(--surface-2);
-  color: var(--vscode-foreground);
-  border: 1px solid var(--border-subtle);
-  transition: all var(--duration) var(--ease);
-}
-
-.badge.active {
-  background: linear-gradient(135deg, var(--accent), hsl(calc(var(--accent-h) + 20), 80%, 55%));
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 2px 6px var(--accent-glow);
-}
-
-.badge.warn {
-  background: linear-gradient(135deg, var(--quota-low), hsl(10, 80%, 60%));
-  color: #fff;
-  border-color: transparent;
-  box-shadow: 0 2px 6px var(--quota-low-glow);
-  animation: pulse-badge 2s ease-in-out infinite;
-}
-
-@keyframes pulse-badge {
-  0%, 100% { box-shadow: 0 2px 6px var(--quota-low-glow); }
-  50% { box-shadow: 0 2px 12px var(--quota-low-glow); }
+  color: var(--fg-muted);
 }
 
 .account-actions {
+  grid-area: actions;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  flex: none;
+  justify-content: flex-end;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .account-header:hover {
+    background: var(--surface-2);
+  }
+
+  .account-header:hover .chevron {
+    color: var(--fg);
+  }
+
+  .account:hover .grip {
+    opacity: 0.6;
+  }
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border-subtle);
+}
+
+.badge.active {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+
+.badge.warn {
+  background: transparent;
+  color: var(--quota-low);
+  border-color: var(--quota-low);
 }
 
 .error-note {
-  padding: 8px 16px;
+  padding: 8px var(--pad-x);
   font-size: 11.5px;
   color: var(--quota-low);
-  background: rgba(248, 113, 113, 0.08);
-  border-top: 1px solid rgba(248, 113, 113, 0.15);
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .error-note::before {
-  content: '⚠';
-  font-size: 13px;
+  content: '!';
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
 }
 
 /* ── Quota grid ──────────────────────────────────────────────────────────── */
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px var(--pad-x) 12px;
 }
 
 .model {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  background: var(--surface-glass);
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: var(--r-item);
+  background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  transition: all var(--duration) var(--ease);
-  position: relative;
-  overflow: hidden;
-}
-
-.model::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.02), transparent);
-  pointer-events: none;
-}
-
-.model:hover {
-  border-color: var(--border);
-  background: var(--surface-2);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .model-top {
@@ -511,6 +539,7 @@ main {
   gap: 8px;
   align-items: baseline;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .model-name {
@@ -522,57 +551,59 @@ main {
 }
 
 .model-pct {
-  font-variant-numeric: tabular-nums;
   font-size: 13px;
   font-weight: 700;
   flex: none;
 }
 
+/* Two facts on one line, and the left one is the long one. Without the min
+   width reset the model id pushes the reset countdown off the card. */
 .model-sub {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   font-size: 10px;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.8;
+  color: var(--fg-muted);
 }
 
-/* Animated quota bars */
+.model-sub > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-sub > span:last-child {
+  flex: none;
+}
+
 .bar {
   height: 4px;
-  border-radius: 4px;
-  background: rgba(128, 128, 128, 0.15);
+  border-radius: var(--r-pill);
+  background: rgba(127, 127, 127, 0.18);
   overflow: hidden;
-  position: relative;
 }
 
 .bar > span {
   display: block;
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--r-pill);
   width: 0%;
-  transition: width 0.8s var(--ease);
+  transition: width 520ms var(--ease-out);
 }
 
-/* Quota color system with glow */
+/* Applied around a silent re-render so the bars do not replay their growth. */
+.instant .bar > span {
+  transition: none;
+}
+
 .quota-good { color: var(--quota-good); }
 .quota-warn { color: var(--quota-warn); }
 .quota-low  { color: var(--quota-low); }
 
-.bar-good {
-  background: linear-gradient(90deg, var(--quota-good), hsl(152, 68%, 55%));
-  box-shadow: 0 0 8px var(--quota-good-glow);
-}
-
-.bar-warn {
-  background: linear-gradient(90deg, var(--quota-warn), hsl(38, 90%, 55%));
-  box-shadow: 0 0 8px var(--quota-warn-glow);
-}
-
-.bar-low {
-  background: linear-gradient(90deg, var(--quota-low), hsl(0, 80%, 60%));
-  box-shadow: 0 0 8px var(--quota-low-glow);
-}
+.bar-good { background: var(--quota-good); }
+.bar-warn { background: var(--quota-warn); }
+.bar-low  { background: var(--quota-low); }
 
 /* ── Group buckets ───────────────────────────────────────────────────────── */
 
@@ -580,27 +611,11 @@ main {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 16px 12px;
+  padding: 0 var(--pad-x) 12px;
   font-size: 11px;
-  color: var(--vscode-descriptionForeground);
+  color: var(--fg-muted);
 }
 
-.group-bucket {
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  font-size: 10.5px;
-  font-weight: 500;
-  transition: all var(--duration) var(--ease);
-  background: var(--surface-glass);
-}
-
-.group-bucket:hover {
-  border-color: var(--border);
-  background: var(--surface-2);
-}
-
-/* One row per quota group, its name leading the chips it owns. */
 .group {
   display: flex;
   flex-wrap: wrap;
@@ -614,135 +629,194 @@ main {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.8;
+  color: var(--fg-muted);
 }
 
-/* Chips under a collapsed card sit tighter — they are the whole card body. */
+.group-bucket {
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  font-size: 10.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chips under a collapsed card are the whole card body, so they sit on the
+   card's own padding rather than being indented to line up with the avatar. */
 .groups.summary {
-  padding: 0 16px 12px 40px;
+  padding-top: 2px;
 }
 
 /* ── Full model list toggle ──────────────────────────────────────────────── */
 
 .more {
-  padding: 0 16px 12px;
+  padding: 0 var(--pad-x) 12px;
 }
 
 /* ── Usage tab ───────────────────────────────────────────────────────────── */
 
 .usage-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
 }
 
 .usage-header h2 {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  margin: 0;
-  background: linear-gradient(135deg, var(--vscode-foreground), var(--vscode-descriptionForeground));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  letter-spacing: 0.01em;
+}
+
+/* The scroll container exists so the table can never be clipped again. Before,
+   the body hid the overflow and the Input and Thinking columns simply left the
+   panel with no way to reach them. */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
 }
 
 .usage-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  border-radius: var(--radius);
-  overflow: hidden;
 }
 
 .usage-table th,
 .usage-table td {
   padding: 8px 12px;
   text-align: left;
-  border-bottom: 1px solid var(--border-subtle);
+}
+
+.usage-table tbody tr {
+  border-top: 1px solid var(--border-subtle);
 }
 
 .usage-table thead th {
   background: var(--surface-1);
-  color: var(--vscode-descriptionForeground);
+  color: var(--fg-muted);
   font-weight: 600;
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
-.usage-table tbody tr {
-  transition: background var(--duration) var(--ease);
-}
-
-.usage-table tbody tr:hover {
-  background: var(--surface-glass);
-}
-
-.usage-table .num,
-.usage-table td.num {
+.usage-table .num {
   text-align: right;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
+  white-space: nowrap;
 }
 
-/* ── Reordering ──────────────────────────────────────────────────────────── */
-
-.grip {
-  cursor: grab;
-  opacity: 0.3;
-  font-size: 12px;
-  line-height: 1;
-  letter-spacing: -1px;
-  user-select: none;
+/* Narrow: the table stops being a table. Each record becomes a card with the
+   model on top, the account under it, and the four counts as a labelled strip,
+   so nothing has to be scrolled sideways to be read. The explicit roles in the
+   markup keep the table semantics that changing `display` would otherwise drop. */
+.usage-table thead {
+  display: none;
 }
 
-.account:hover .grip {
-  opacity: 0.6;
+.usage-table,
+.usage-table tbody,
+.usage-table td {
+  display: block;
 }
 
-.account.dragging {
-  opacity: 0.45;
-  cursor: grabbing;
+.usage-table tr {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 8px;
+  padding: 10px 12px;
 }
 
-.account.dragging .grip {
-  cursor: grabbing;
+.usage-table td {
+  padding: 0;
+  min-width: 0;
+}
+
+.usage-table td[data-col='model'] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-table td[data-col='account'] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  margin-top: -9px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* No explicit row: the two full-width cells above already own rows 1 and 2, so
+   the counts auto-flow into what is left. That is what lets the strip fold to
+   two columns further down without every count fighting for the same row. */
+.usage-table td.num {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+  font-size: 11.5px;
+}
+
+.usage-table td.num::before {
+  content: attr(data-label);
+  max-width: 100%;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A sidebar can be dragged narrower than four columns of six-figure numbers.
+   Two by two keeps every count legible instead of clipping all four. */
+@media (max-width: 299px) {
+  .usage-table tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ── Quota trend sparklines ──────────────────────────────────────────────── */
 
 .trends {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-  margin-bottom: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.trends:empty {
+  display: none;
 }
 
 .trend {
-  padding: 12px 14px;
+  min-width: 0;
+  padding: 10px 12px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  background: var(--surface-glass);
-  transition: all var(--duration) var(--ease);
-}
-
-.trend:hover {
-  border-color: var(--border);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-}
-
-.trend-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  border-radius: var(--r-card);
+  background: var(--surface-1);
 }
 
 .trend-name {
+  display: block;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -750,8 +824,7 @@ main {
 
 .trend-foot {
   font-size: 10px;
-  color: var(--vscode-descriptionForeground);
-  opacity: 0.7;
+  color: var(--fg-muted);
 }
 
 .spark {
@@ -764,7 +837,7 @@ main {
 .spark polyline {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 1.8;
+  stroke-width: 1.6;
   vector-effect: non-scaling-stroke;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -772,89 +845,82 @@ main {
 
 /* One line per vendor family, matched by the legend dots below the chart. */
 .spark polyline.spark-claude,
-.dot.spark-claude {
-  stroke: #d97757;
-  background: #d97757;
-}
+.dot.spark-claude { stroke: #d97757; background: #d97757; }
 
 .spark polyline.spark-gemini,
-.dot.spark-gemini {
-  stroke: #4285f4;
-  background: #4285f4;
-}
+.dot.spark-gemini { stroke: #4285f4; background: #4285f4; }
 
 .spark polyline.spark-gpt,
-.dot.spark-gpt {
-  stroke: #10a37f;
-  background: #10a37f;
-}
+.dot.spark-gpt { stroke: #10a37f; background: #10a37f; }
 
 .spark polyline.spark-other,
-.dot.spark-other {
-  stroke: var(--vscode-descriptionForeground);
-  background: var(--vscode-descriptionForeground);
-}
+.dot.spark-other { stroke: var(--fg-muted); background: var(--fg-muted); }
 
 .trend-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 3px 10px;
   font-size: 10.5px;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .trend-legend .legend {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  color: var(--vscode-descriptionForeground);
+  gap: 4px;
+  color: var(--fg-muted);
+}
+
+.trend-legend .dot {
+  width: 6px;
+  height: 6px;
 }
 
 .trend-legend b {
   font-weight: 600;
 }
 
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 3px;
-}
-
 /* ── Empty states + footer ───────────────────────────────────────────────── */
 
 .empty {
   text-align: center;
-  padding: 48px 20px;
-  color: var(--vscode-descriptionForeground);
+  padding: 40px 16px;
+  color: var(--fg-muted);
+}
+
+.empty .brand {
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  opacity: 0.9;
 }
 
 .empty h2 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  color: var(--vscode-foreground);
-  margin: 0 0 8px;
+  color: var(--fg);
+  margin-bottom: 8px;
 }
 
 .empty p {
   margin: 0 auto 18px;
-  max-width: 360px;
+  max-width: 42ch;
   line-height: 1.6;
   font-size: 12.5px;
-  opacity: 0.85;
 }
 
 .empty-note {
-  color: var(--vscode-descriptionForeground);
+  color: var(--fg-muted);
   font-size: 12px;
-  opacity: 0.75;
   text-align: center;
-  padding: 16px;
+  padding: 20px 16px;
+  max-width: 46ch;
+  margin: 0 auto;
+  line-height: 1.6;
 }
 
 .footer {
-  padding: 10px 16px 18px;
+  padding: 8px var(--pad-x) 16px;
   display: flex;
   justify-content: center;
 }
@@ -863,56 +929,185 @@ main {
   background: none;
   border: none;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   color: var(--vscode-textLink-foreground);
   cursor: pointer;
+  font-family: inherit;
   font-size: 11px;
-  transition: all var(--duration) var(--ease);
-  opacity: 0.7;
+  transition:
+    background var(--quick) var(--ease-out),
+    transform var(--press) var(--ease-out);
 }
 
-.link:hover {
-  opacity: 1;
-  text-decoration: none;
-  background: var(--surface-glass);
+@media (hover: hover) and (pointer: fine) {
+  .link:hover {
+    background: var(--surface-1);
+  }
 }
 
-/* ── Entrance animations ─────────────────────────────────────────────────── */
+/* ── Reordering ──────────────────────────────────────────────────────────── */
 
-@keyframes fade-slide-in {
+.account.dragging {
+  opacity: 0.45;
+}
+
+.account.dragging .grip {
+  cursor: grabbing;
+}
+
+/* ── Wide: 560px and up ──────────────────────────────────────────────────── */
+
+@media (min-width: 560px) {
+  .toolbar {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-end;
+  }
+
+  /* Everything fits on one line again, so put it back on one line. */
+  .integration-row {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: 'dot copy status actions';
+    padding: 9px 12px;
+  }
+
+  .integration-status {
+    max-width: 220px;
+  }
+
+  .account-header {
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas: 'grip chevron avatar identity actions';
+  }
+
+  .account-actions {
+    flex-wrap: nowrap;
+  }
+
+  /* And the usage cards go back to being a table. */
+  .usage-table {
+    display: table;
+  }
+
+  .usage-table thead {
+    display: table-header-group;
+  }
+
+  .usage-table tbody {
+    display: table-row-group;
+  }
+
+  .usage-table tr {
+    display: table-row;
+    padding: 0;
+  }
+
+  .usage-table td {
+    display: table-cell;
+    padding: 8px 12px;
+  }
+
+  /* Each of these has to out-specify its own narrow rule, so the resets are
+     written against the same selector rather than the bare `td` above. */
+  .usage-table td.num {
+    display: table-cell;
+    text-align: right;
+  }
+
+  .usage-table td.num::before {
+    content: none;
+  }
+
+  /* max-width: 0 is the trick that lets a percentage-width cell ellipsis. */
+  .usage-table td[data-col='model'],
+  .usage-table td[data-col='account'] {
+    max-width: 0;
+    width: 30%;
+    margin: 0;
+    font-size: 12px;
+  }
+
+  .usage-table td[data-col='model'] {
+    font-weight: 500;
+    color: var(--fg);
+  }
+
+  .usage-table td[data-col='account'] {
+    font-weight: 400;
+    color: var(--fg-muted);
+  }
+
+  .trends {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+
+/* ── Roomy: the editor tab ───────────────────────────────────────────────── */
+
+@media (min-width: 900px) {
+  :root {
+    --pad-x: 18px;
+    --gap: 12px;
+  }
+
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .model-grid {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+}
+
+/* ── Entrance ────────────────────────────────────────────────────────────── */
+
+/* Only on the session's first paint. The card list is rebuilt on every expand,
+   collapse and drop, and replaying this each time made the whole panel look
+   like it was reloading itself every time a card was touched. */
+@keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+    transform: translateY(6px);
   }
 }
 
-.account {
-  animation: fade-slide-in 0.4s var(--ease) both;
+.first-paint .account {
+  animation: rise-in 260ms var(--ease-out) both;
 }
 
-.account:nth-child(1) { animation-delay: 0s; }
-.account:nth-child(2) { animation-delay: 0.05s; }
-.account:nth-child(3) { animation-delay: 0.1s; }
-.account:nth-child(4) { animation-delay: 0.15s; }
-.account:nth-child(5) { animation-delay: 0.2s; }
+.first-paint .account:nth-child(2) { animation-delay: 40ms; }
+.first-paint .account:nth-child(3) { animation-delay: 80ms; }
+.first-paint .account:nth-child(4) { animation-delay: 120ms; }
+.first-paint .account:nth-child(n + 5) { animation-delay: 160ms; }
 
-.integration-row {
-  animation: fade-slide-in 0.3s var(--ease) both;
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+/* Fewer and gentler, not none: the bars still fill and the chevron still turns,
+   they just stop travelling across the panel to do it. */
+@media (prefers-reduced-motion: reduce) {
+  .first-paint .account {
+    animation: none;
+  }
+
+  .btn:active,
+  .link:active {
+    transform: none;
+  }
+
+  .bar > span {
+    transition-duration: 1ms;
+  }
 }
 
-.model {
-  animation: fade-slide-in 0.35s var(--ease) both;
-}
-
-/* ── Scrollbar styling ───────────────────────────────────────────────────── */
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -920,16 +1115,14 @@ main {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.2);
-  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.24);
+  border-radius: var(--r-pill);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(128, 128, 128, 0.35);
+  background: rgba(127, 127, 127, 0.4);
 }
 
-/* ── Selection ───────────────────────────────────────────────────────────── */
-
 ::selection {
-  background: var(--accent-subtle);
+  background: var(--accent-soft);
 }

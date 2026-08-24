@@ -13,7 +13,7 @@
   const persisted = vscode.getState() || {};
   const restorable = persisted.stateVersion === STATE_VERSION ? persisted : {};
   const openAccounts = new Set(restorable.openAccounts || []);
-  /** The bars animate once, on the first render of a session. */
+  /** Cards and bars animate once, on the first render of a session. */
   let barsAnimated = false;
   const openModelLists = new Set(restorable.openModelLists || []);
 
@@ -22,6 +22,7 @@
     empty: document.getElementById('empty'),
     integrations: document.getElementById('integrations'),
     trends: document.getElementById('trends'),
+    usageTable: document.querySelector('.table-wrap'),
     usageBody: document.getElementById('usage-body'),
     usageEmpty: document.getElementById('usage-empty'),
   };
@@ -167,61 +168,77 @@
       return;
     }
 
-    const gatewayDot = status.gateway.running ? 'on' : 'off';
-    const gatewayLabel = status.gateway.running
-      ? 'Gateway ' + escapeHtml(status.gateway.url || '')
-      : 'Gateway stopped';
-
-    const rows = status.integrations.map(function (item) {
-      const stateText = !item.installed
-        ? 'not detected'
-        : item.active
-          ? escapeHtml(item.modelId || 'a model')
-          : escapeHtml(item.idleText || 'own defaults');
-      const dot = item.active ? 'on' : item.installed ? 'idle' : 'off';
-      const tone = !item.installed ? 'off' : item.active ? 'on' : 'idle';
-      const target = escapeAttribute(item.target);
-      const restorable = item.restorable !== false;
-      return (
-        '<div class="integration-row" title="' + escapeAttribute(item.detail || '') + '">' +
-        '<span class="dot ' + dot + '"></span>' +
-        '<span class="integration-name">' + escapeHtml(item.label) + '</span>' +
-        '<span class="integration-state">' +
-        '<span class="integration-status-label ' + tone + '">' + stateText + '</span>' +
-        '</span>' +
-        '<span class="integration-actions">' +
-        '<button class="btn" data-agent="' + target + '" data-agent-action="applyAgent">' +
-        escapeHtml(item.applyLabel || 'Use model') +
-        '</button>' +
-        (item.active && restorable
-          ? '<button class="btn subtle" data-agent="' + target + '" data-agent-action="restoreAgent">Restore</button>'
-          : '') +
-        '</span></div>'
-      );
+    // The gateway only matters to tools outside VS Code, so its row says what
+    // it is for rather than assuming the reader knows. The URL goes on its own
+    // line: appended to the name it was the thing that pushed every other row
+    // in this list out of shape.
+    const running = status.gateway.running;
+    const gateway = integrationRow({
+      dot: running ? 'on' : 'off',
+      name: 'Gateway',
+      note: running ? status.gateway.url || '' : 'not running',
+      status: running ? 'running' : 'stopped',
+      tone: running ? 'on' : 'off',
+      title: 'Local endpoint for tools outside VS Code',
+      actions:
+        '<button class="btn" data-gateway-action="copyGatewayInfo" title="Copy the base URL and key for a terminal CLI or another tool">Copy URL + key</button>' +
+        '<button class="btn subtle" data-gateway-action="restartGateway" title="Restart the local server if the port changed or requests stopped going through">Restart</button>',
     });
 
-    // The gateway only matters to tools outside VS Code, so its buttons say
-    // what they are for rather than assuming the reader knows.
-    el.integrations.innerHTML =
-      '<div class="integration-row">' +
-      '<span class="dot ' + gatewayDot + '"></span>' +
-      '<span class="integration-name">' + gatewayLabel + '</span>' +
-      '<span class="integration-state">local endpoint for outside tools</span>' +
-      '<span class="integration-actions">' +
-      '<button class="btn" data-gateway-action="copyGatewayInfo" title="Copy the base URL and key, to point a terminal CLI or another tool at these models yourself">Copy URL + key</button>' +
-      '<button class="btn subtle" data-gateway-action="restartGateway" title="Restart the local server — use it if the port changed or requests stopped going through">Restart</button>' +
-      '</span></div>' +
-      rows.join('');
+    const rows = status.integrations.map(function (item) {
+      const target = escapeAttribute(item.target);
+      const restorable = item.restorable !== false;
+      return integrationRow({
+        dot: item.active ? 'on' : item.installed ? 'idle' : 'off',
+        name: item.label,
+        status: !item.installed
+          ? 'not detected'
+          : item.active
+            ? item.modelId || 'a model'
+            : item.idleText || 'own defaults',
+        tone: !item.installed ? 'off' : item.active ? 'on' : 'idle',
+        title: item.detail || '',
+        actions:
+          '<button class="btn" data-agent="' + target + '" data-agent-action="applyAgent">' +
+          escapeHtml(item.applyLabel || 'Use model') +
+          '</button>' +
+          (item.active && restorable
+            ? '<button class="btn subtle" data-agent="' + target + '" data-agent-action="restoreAgent">Restore</button>'
+            : ''),
+      });
+    });
+
+    el.integrations.innerHTML = gateway + rows.join('');
+  }
+
+  /**
+   * One row of the integrations list, as four independent cells. Below 560px
+   * the stylesheet moves the buttons onto their own line; written as a single
+   * flex line, the name and the status had nothing left to shrink into.
+   */
+  function integrationRow(row) {
+    return (
+      '<div class="integration-row" title="' + escapeAttribute(row.title || '') + '">' +
+      '<span class="dot ' + row.dot + '"></span>' +
+      '<div class="integration-copy">' +
+      '<span class="integration-name">' + escapeHtml(row.name) + '</span>' +
+      (row.note ? '<span class="integration-note">' + escapeHtml(row.note) + '</span>' : '') +
+      '</div>' +
+      '<span class="integration-status ' + row.tone + '">' + escapeHtml(row.status) + '</span>' +
+      '<div class="integration-actions">' + row.actions + '</div>' +
+      '</div>'
+    );
   }
 
   function renderAccounts() {
     el.empty.classList.toggle('hidden', state.accounts.length > 0);
+    // The cards rise in and the bars grow from zero on the first paint only.
+    // Replaying either on every expand, collapse or drop made the whole panel
+    // look like it was reloading itself each time a card was touched.
+    el.accounts.classList.toggle('first-paint', !barsAnimated);
     el.accounts.innerHTML = state.accounts.map(renderAccount).join('');
     document.getElementById('collapse-all').textContent =
       openAccounts.size > 0 ? 'Collapse all' : 'Expand all';
-    // The bars grow from zero on the first paint only. Replaying that on every
-    // expand, collapse or drop made the whole panel look like it was reloading
-    // itself each time a card was touched.
     paintBars(el.accounts, !barsAnimated);
     barsAnimated = true;
   }
@@ -261,7 +278,7 @@
     return `
       <article class="account ${account.isActive ? 'active' : ''} ${account.needsReauth ? 'stale' : ''}" draggable="true" data-account-id="${account.id}">
         <div class="account-header ${open ? 'open' : ''}" data-toggle="account" data-account-id="${account.id}" role="button" aria-expanded="${open}" title="${open ? 'Collapse' : 'Expand'} this account">
-          <span class="grip" title="Drag to reorder — rotation falls back down this list">⠿</span>
+          <span class="grip" title="Drag to reorder. Rotation falls back down this list">⠿</span>
           <span class="chevron ${open ? 'open' : ''}" aria-hidden="true">›</span>
           ${avatar}
           <div class="identity">
@@ -384,9 +401,7 @@
         const families = familiesOf(entry.points);
         return (
           '<div class="trend">' +
-          '<div class="trend-head">' +
           '<span class="trend-name">' + escapeHtml(account.email) + '</span>' +
-          '</div>' +
           sparkline(entry.points, families) +
           '<div class="trend-legend">' +
           families
@@ -470,20 +485,42 @@
     renderTrends();
     const rows = state.usage || [];
     el.usageEmpty.classList.toggle('hidden', rows.length > 0);
-    el.usageBody.innerHTML = rows
-      .map((row) => {
-        const account = state.accounts.find((candidate) => candidate.id === row.accountId);
-        return `
-          <tr>
-            <td>${escapeHtml(account ? account.email : row.accountId)}</td>
-            <td>${escapeHtml(row.modelId)}</td>
-            <td class="num">${row.requests}</td>
-            <td class="num">${formatNumber(row.inputTokens)}</td>
-            <td class="num">${formatNumber(row.thoughtTokens || 0)}</td>
-            <td class="num">${formatNumber(row.outputTokens)}</td>
-          </tr>`;
-      })
-      .join('');
+    // An empty table is a header over nothing. The note below it already says
+    // what to do, so the frame goes away until there is something to frame.
+    el.usageTable.classList.toggle('hidden', rows.length === 0);
+    el.usageBody.innerHTML = rows.map(renderUsageRow).join('');
+  }
+
+  /**
+   * One usage record. Each cell names the column it belongs to and the heading
+   * it sits under, because below 560px the stylesheet folds the table into
+   * cards and every number then has to introduce itself.
+   */
+  function renderUsageRow(row) {
+    const account = state.accounts.find((candidate) => candidate.id === row.accountId);
+
+    const text = (column, value) =>
+      '<td role="cell" data-col="' + column + '">' + escapeHtml(value) + '</td>';
+
+    const count = (column, label, heading, value) =>
+      '<td role="cell" class="num" data-col="' + column + '" data-label="' + label + '"' +
+      ' title="' + escapeAttribute(formatNumber(value) + ' ' + heading.toLowerCase()) + '">' +
+      escapeHtml(formatCompact(value)) +
+      '</td>';
+
+    return (
+      '<tr role="row">' +
+      text('account', account ? account.email : row.accountId) +
+      text('model', row.modelId) +
+      // Short labels, because these only appear in the folded card view where
+      // four of them share the width of one sidebar. The table keeps the full
+      // words in its header row.
+      count('requests', 'Req', 'Requests', row.requests) +
+      count('input', 'In', 'Input', row.inputTokens) +
+      count('thinking', 'Think', 'Thinking', row.thoughtTokens || 0) +
+      count('output', 'Out', 'Output', row.outputTokens) +
+      '</tr>'
+    );
   }
 
   /**
@@ -516,7 +553,9 @@
 
   function selectTab(name) {
     document.querySelectorAll('.tab').forEach((tab) => {
-      tab.classList.toggle('active', tab.dataset.tab === name);
+      const selected = tab.dataset.tab === name;
+      tab.classList.toggle('active', selected);
+      tab.setAttribute('aria-selected', String(selected));
     });
     document.getElementById('accounts-tab').classList.toggle('hidden', name !== 'accounts');
     document.getElementById('usage-tab').classList.toggle('hidden', name !== 'usage');
@@ -540,7 +579,23 @@
   }
 
   function formatNumber(value) {
-    return value.toLocaleString();
+    return (Number(value) || 0).toLocaleString();
+  }
+
+  /**
+   * Token counts reach the millions, and on a docked sidebar four of them share
+   * one line. Past five figures the number is shortened so the strip stays
+   * readable at a glance; the exact figure rides along in the cell's tooltip.
+   */
+  function formatCompact(value) {
+    const count = Number(value) || 0;
+    if (count < 10000) {
+      return formatNumber(count);
+    }
+    if (count < 1000000) {
+      return (count / 1000).toFixed(count < 100000 ? 1 : 0) + 'k';
+    }
+    return (count / 1000000).toFixed(1) + 'M';
   }
 
   function escapeHtml(value) {
