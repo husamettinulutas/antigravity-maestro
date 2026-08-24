@@ -46,17 +46,36 @@ export function displayNamesFor(
   return names;
 }
 
+/** Separates a label from the id appended to it when the two disagree. */
+const ID_SEPARATOR = ' · ';
+
 /**
  * Keep `label`, but append the id when the two name different models — the
  * upstream label is what the model is findable by, and the id is what the
  * request actually carries.
+ *
+ * Naming runs more than once over the same data: the quota service stores the
+ * name it produced back onto the model, and the catalog and the panel each name
+ * that stored list again. So an id that is already appended has to be left
+ * alone rather than appended a second time.
  */
 function disambiguate(label: string, modelId: string): string {
+  const bare = stripAppendedId(label, modelId);
   const derived = displayNameFor(modelId);
-  if (!derived || !conflicts(label, derived)) {
-    return label;
+  if (!derived || !conflicts(bare, derived)) {
+    return bare;
   }
-  return `${label} · ${modelId}`;
+  return `${bare}${ID_SEPARATOR}${modelId}`;
+}
+
+/** Undo any number of previous appends, so naming is safe to repeat. */
+function stripAppendedId(label: string, modelId: string): string {
+  const suffix = `${ID_SEPARATOR}${modelId}`;
+  let bare = label.trim();
+  while (bare.toLowerCase().endsWith(suffix.toLowerCase())) {
+    bare = bare.slice(0, -suffix.length).trim();
+  }
+  return bare === '' ? label.trim() : bare;
 }
 
 /**

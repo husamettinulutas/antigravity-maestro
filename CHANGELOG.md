@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.4
+
+- **The appended model id is no longer repeated.** 1.0.3 started showing the id
+  next to a label that disagrees with it, but naming runs three times over the
+  same data — the quota service stores the name it produced back onto the model,
+  and the catalog and the panel each name that stored list again. Every pass
+  appended the id afresh, so the model picker read
+  `Gemini 3.5 Flash (High) · gemini-3-flash-agent · gemini-3-flash-agent`.
+  Naming is now idempotent: an id already appended is recognised and left alone.
+
 ## 1.0.3
 
 - **A rate limited endpoint is not retried on every request.** The primary Cloud
