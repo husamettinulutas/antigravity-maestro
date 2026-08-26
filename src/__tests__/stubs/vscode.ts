@@ -54,6 +54,11 @@ export const workspace = {
   }),
 };
 
+export const env = {
+  machineId: 'test-machine-id',
+  sessionId: 'test-session-id',
+};
+
 export const window = {
   createOutputChannel: () => ({
     appendLine: () => undefined,

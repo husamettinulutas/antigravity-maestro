@@ -1,5 +1,7 @@
+import * as vscode from 'vscode';
 import { Config } from '../utils/config';
 import { readBody, request } from '../utils/http';
+import { uuid } from '../utils/ids';
 import { Logger } from '../utils/logger';
 
 /** Used when the real Antigravity version cannot be discovered. */
@@ -43,6 +45,60 @@ export async function resolveUserAgent(): Promise<string> {
 /** Synchronous best effort — used before the async lookup has finished. */
 export function currentUserAgent(): string {
   return cachedUserAgent ?? buildUserAgent(FALLBACK_VERSION);
+}
+
+/** The Antigravity version this session claims, for `x-client-version`. */
+export function currentVersion(): string {
+  return VERSION_REGEX_SINGLE.exec(currentUserAgent())?.[0] ?? FALLBACK_VERSION;
+}
+
+const VERSION_REGEX_SINGLE = /\d+\.\d+\.\d+/;
+
+/**
+ * Device and session identity, as the official client reports it.
+ *
+ * The Cloud Code endpoints meter an anonymous caller far more tightly than a
+ * recognised one, and these two headers plus `x-client-name` are what a real
+ * Antigravity install sends. VS Code already keeps exactly the right values:
+ * `machineId` is stable per install, `sessionId` per window launch.
+ */
+export function clientIdentity(): { machineId: string; sessionId: string } {
+  return {
+    machineId: fallbackTo(() => vscode.env.machineId, stableMachineId),
+    sessionId: fallbackTo(() => vscode.env.sessionId, () => launchSessionId),
+  };
+}
+
+const launchSessionId = uuid();
+let cachedMachineId: string | undefined;
+
+/** Used only when the host does not expose `env.machineId`. */
+function stableMachineId(): string {
+  cachedMachineId ??= uuid();
+  return cachedMachineId;
+}
+
+function fallbackTo(read: () => string | undefined, fallback: () => string): string {
+  try {
+    const value = read();
+    return value && value.trim() !== '' ? value : fallback();
+  } catch {
+    return fallback();
+  }
+}
+
+/**
+ * The `userAgent` the request body carries — a bare product token, not the
+ * versioned string the HTTP header uses. Consumer accounts report as
+ * `antigravity`; everything else is a managed account, which the endpoints
+ * expect to see identify as `jetski`.
+ */
+export function bodyUserAgent(email: string | undefined): string {
+  if (!email) {
+    return 'antigravity';
+  }
+  const consumer = /@(gmail|googlemail)\.com$/i.test(email.trim());
+  return consumer ? 'antigravity' : 'jetski';
 }
 
 async function discoverVersion(): Promise<string> {

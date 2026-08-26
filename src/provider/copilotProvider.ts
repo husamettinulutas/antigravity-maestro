@@ -123,12 +123,14 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
           request,
           accessToken: context.accessToken,
           projectId: context.projectId,
+          accountId: context.accountId,
+      accountEmail: context.email,
           signal: abort.signal,
           requestType: 'agent',
         });
 
         await this.pumpStream(stream, progress, context, token);
-      });
+      }, abort.signal);
     } catch (error) {
       if (token.isCancellationRequested) {
         return;

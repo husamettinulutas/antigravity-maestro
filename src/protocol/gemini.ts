@@ -79,6 +79,8 @@ export interface GeminiRequest {
   toolConfig?: { functionCallingConfig: { mode: string; allowedFunctionNames?: string[] } };
   generationConfig?: GenerationConfig;
   safetySettings?: SafetySetting[];
+  /** Stable per-account id the official client sends; see `sessionIdFor`. */
+  sessionId?: string;
 }
 
 /** The body the v1internal endpoints expect. */

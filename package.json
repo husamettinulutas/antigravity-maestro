@@ -2,7 +2,7 @@
   "name": "antigravity-maestro",
   "displayName": "Antigravity Maestro",
   "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "publisher": "husamettinulutas",
   "author": {
     "name": "Hüsamettin Ulutaş",
@@ -224,6 +224,20 @@
           "minimum": 1,
           "maximum": 1440,
           "description": "Fallback cooldown applied to an account after a rate limit, when the upstream does not report a reset time."
+        },
+        "antigravityMaestro.rotation.maxWaitSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "maximum": 120,
+          "description": "How long a request may wait for a cooling-down account to recover before failing. Waiting briefly keeps a short rate-limit window from surfacing as an error in Claude Code. Set to 0 to fail immediately."
+        },
+        "antigravityMaestro.maxConcurrentRequestsPerAccount": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 16,
+          "description": "How many requests may be waiting for upstream acceptance at once on a single account. Clients like Claude Code open several turns in parallel, and an unthrottled burst spends the account's per-minute allowance in one salvo. Set to 0 to disable pacing."
         },
         "antigravityMaestro.requestTimeoutSeconds": {
           "type": "number",

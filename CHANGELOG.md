@@ -1,5 +1,90 @@
 # Changelog
 
+## 1.0.8
+
+- **Requests no longer go to the host that refuses them.** Generate calls were
+  sent to `cloudcode-pa.googleapis.com` first. That host meters this traffic far
+  more tightly than the two alternatives: on accounts sitting at full quota it
+  answers the very first request of a session with `RESOURCE_EXHAUSTED`, and no
+  amount of pacing or account rotation gets around it, because the limit is not
+  the account's. Every account reading 100% in the panel while every request
+  came back 429 was this, and the quota lookups in this same extension had been
+  quietly using the sandbox host first all along. Generate calls now follow the
+  same order — sandbox, then daily, then production as a last resort.
+
+- **The request identifies itself the way the real client does.** The endpoints
+  meter an unrecognised caller much harder than a known one, and several
+  fingerprint fields were wrong or missing:
+
+  - `x-client-name`, `x-client-version`, `x-machine-id` and `x-vscode-sessionid`
+    were not sent at all. VS Code already keeps the right values — `machineId`
+    is stable per install, `sessionId` per window.
+  - `requestId` was a bare UUID; the real client sends
+    `agent/<epoch-millis>/<8 hex>`.
+  - The body's `userAgent` carried the full versioned header string. It is a
+    bare product token: `antigravity` for consumer accounts, `jetski` for
+    managed ones.
+  - The per-account `sessionId` that ties a conversation's turns together
+    upstream was absent. It is an FNV-1a hash of the account id, ported here and
+    checked against an independent implementation of the same hash.
+  - A placeholder project id (`test-project`, `project-id`) is no longer sent as
+    `x-goog-user-project`.
+
+- **The request is ordered so the prompt cache can hit.** Upstream caching
+  matches on a byte prefix, so `contents` — the part that grows every turn — now
+  comes last, after the system instruction, tools and generation config that do
+  not change. Only key order changes; nothing about the request's meaning does.
+
+- **A rate limit no longer fails over to the second host.** Both hosts meter the
+  same account, so the retry was a guaranteed second 429 that doubled the load
+  exactly when there was none left to spend, and it branded a healthy endpoint
+  degraded for five minutes over a per-account condition. Failover is now what
+  the official client does: request timeouts, 404s and server errors only.
+
+- **One exhausted window is no longer punished several times over.** Parallel
+  turns each reported the same rate limit and each counted as a fresh strike, so
+  a burst of three backed an account off for four minutes over a sixty-second
+  window. Only a limit arriving after the previous cooldown has lapsed now
+  counts as a new strike, and a concurrent report can never shorten a wait
+  already in force.
+
+- **The escalating backoff now actually escalates.** Reading a lapsed cooldown
+  deleted it, so the strike count was gone by the time the account was next
+  tried and a genuinely spent account kept backing off by the base thirty
+  seconds forever. Lapsed cooldowns are remembered for ten minutes.
+
+- **The wait Google asks for is read.** These endpoints answer with a
+  `google.rpc.RetryInfo` detail rather than a `retry-after` header, so every
+  rate limit fell back to a blind doubling instead of the delay just supplied.
+  The body is now parsed, and that delay is what the cooldown and the client's
+  `retry-after` are built from.
+
+- **Only one request pays to discover the project header verdict.** The memo
+  that remembers a rejected `x-goog-user-project` was only written once the 403
+  came back, so every turn that started before that answer arrived spent its own
+  doomed round trip. The first request to touch a project now probes it and the
+  rest wait for its answer.
+
+- **Parallel turns are paced per account.** At most three requests wait for
+  upstream acceptance on one account at a time
+  (`antigravityMaestro.maxConcurrentRequestsPerAccount`, 0 to disable). The slot
+  is held only until the request is accepted, so parallel answers still stream
+  concurrently.
+
+- **A short cooldown is waited out instead of failed.** When every account is
+  cooling down and the shortest wait is under fifteen seconds
+  (`antigravityMaestro.rotation.maxWaitSeconds`), the request holds — with a
+  little jitter so queued turns do not resume in lockstep — rather than
+  reporting a brief pause back as an error the client answers with an immediate
+  retry.
+
+- **Claude Code's background model is picked in the apply flow.** Claude Code
+  runs its haiku-class calls in parallel with the main turn, and every slot was
+  wired to the same model. Splitting it off was already possible through
+  `antigravityMaestro.claudeCode.smallFastModel` but only by typing a model id
+  into a settings string. Applying Claude Code now offers the choice directly,
+  with the current one marked and "same as the main model" as the first row.
+
 ## 1.0.6
 
 - **Empty or whitespace display names correctly fall back to the model id.** When

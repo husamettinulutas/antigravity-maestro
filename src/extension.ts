@@ -671,8 +671,18 @@ async function applyToAgent(
     return;
   }
 
+  // Claude Code is the only agent with a separate background slot to fill.
+  let smallFast = Config.claudeCodeSmallFastModel();
+  if (integration.target === 'claude-code') {
+    const background = await pickBackgroundModel(deps.catalog, model, smallFast);
+    if (background === undefined) {
+      return;
+    }
+    smallFast = background;
+    await Config.setClaudeCodeSmallFastModel(background);
+  }
+
   const endpoint = deps.gateway.endpoint() ?? (await deps.gateway.start());
-  const smallFast = Config.claudeCodeSmallFastModel();
 
   const status = await integration.apply(model.id, endpoint, {
     maxInputTokens: model.maxInputTokens,
@@ -681,10 +691,70 @@ async function applyToAgent(
   });
 
   void deps.accountsView.postState();
+  const background =
+    smallFast && smallFast !== model.id
+      ? ` Background tasks use ${deps.catalog.resolve(smallFast)?.displayName ?? smallFast}.`
+      : '';
   await promptReload(
-    `${label} now uses ${model.displayName} through Antigravity Maestro. ${status.detail ?? ''}`.trim(),
+    `${label} now uses ${model.displayName} through Antigravity Maestro.${background} ${status.detail ?? ''}`.trim(),
     label,
   );
+}
+
+/**
+ * Choose the model Claude Code's background work runs on.
+ *
+ * Claude Code fills every slot it has and runs them in parallel — the main turn
+ * alongside the haiku-class calls it makes for titles and summaries — so wiring
+ * them to one model points that whole fan-out at one model's allowance on one
+ * account. That is the difference between Claude Code and Copilot Chat, which
+ * only ever has a single turn in flight. Splitting the background traffic off
+ * is the one lever the user has over it, so it is offered here rather than left
+ * to a settings string nobody finds.
+ *
+ * Returns the chosen id, `''` to reuse the main model, or undefined if
+ * cancelled.
+ */
+async function pickBackgroundModel(
+  catalog: ModelCatalog,
+  main: CatalogModel,
+  current: string,
+): Promise<string | undefined> {
+  const models = catalog.listAll().filter((model) => model.supportsTools);
+  const onActive = new Map(catalog.list().map((model) => [model.id, model]));
+
+  const items = [
+    {
+      label: 'Same as the main model',
+      description: main.displayName,
+      detail: 'Background calls share the main model — and the limit it runs into',
+      id: '',
+    },
+    ...models
+      .filter((model) => model.id !== main.id)
+      .map((model) => ({
+        label: model.displayName,
+        description: model.id,
+        detail: `${describeQuota(onActive.get(model.id))} · ${Math.round(model.maxInputTokens / 1000)}K context`,
+        id: model.id,
+      })),
+  ];
+
+  // A QuickPick cannot open on a preselected row, so the current choice is
+  // marked instead — re-running the command then reads as a confirmation
+  // rather than a decision to make again from scratch.
+  const wired = items.find((item) => item.id === current);
+  if (wired) {
+    wired.label = `$(check) ${wired.label}`;
+  }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: "Model for Claude Code's background tasks (titles, summaries, small edits)",
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+
+  return picked?.id;
 }
 
 async function restoreAgent(

@@ -202,11 +202,13 @@ export class GatewayServer {
           request,
           accessToken: context.accessToken,
           projectId: context.projectId,
+          accountId: context.accountId,
+      accountEmail: context.email,
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
         sendJson(res, 200, toAnthropicResponse(response, context.model.id));
-      });
+      }, abort.signal);
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -287,11 +289,13 @@ export class GatewayServer {
           request,
           accessToken: context.accessToken,
           projectId: context.projectId,
+          accountId: context.accountId,
+      accountEmail: context.email,
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
         sendJson(res, 200, toResponsesResponse(response, context.model.id));
-      });
+      }, abort.signal);
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -334,11 +338,13 @@ export class GatewayServer {
           request,
           accessToken: context.accessToken,
           projectId: context.projectId,
+          accountId: context.accountId,
+      accountEmail: context.email,
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
         sendJson(res, 200, toChatCompletion(response, context.model.id));
-      });
+      }, abort.signal);
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -382,6 +388,8 @@ export class GatewayServer {
       request,
       accessToken: context.accessToken,
       projectId: context.projectId,
+      accountId: context.accountId,
+      accountEmail: context.email,
       signal,
     });
 

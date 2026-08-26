@@ -38,6 +38,13 @@ interface Cooldown {
 const BASE_COOLDOWN_MS = 30_000;
 
 /**
+ * How long a lapsed cooldown is remembered. The record has to outlive its own
+ * expiry, otherwise the strike count is gone by the time the account is next
+ * tried and a genuinely exhausted account backs off by the base wait forever.
+ */
+const STRIKE_MEMORY_MS = 10 * 60_000;
+
+/**
  * Picks the account each request runs on and retries on another one when the
  * chosen account is rate limited or out of quota.
  */
@@ -58,8 +65,12 @@ export class AccountLease {
   async run<T>(
     requestedModel: string,
     execute: (context: LeaseContext) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
-    const candidates = this.orderCandidates(requestedModel);
+    let candidates = this.orderCandidates(requestedModel);
+    if (candidates.length === 0 && (await this.waitForRecovery(requestedModel, signal))) {
+      candidates = this.orderCandidates(requestedModel);
+    }
     if (candidates.length === 0) {
       // Sending anyway would earn another rate limit and burn more quota, so
       // the wait is reported instead — that is what stops a retrying client
@@ -76,6 +87,14 @@ export class AccountLease {
       const model = this.catalog.resolve(requestedModel, account.id);
       if (!model) {
         Logger.debug(`${account.email} has no model matching '${requestedModel}'`);
+        continue;
+      }
+      if (this.cooldownSeconds(account.id, model.id) > 0) {
+        // A request that started alongside this one may have rate limited the
+        // account since the candidates were ordered. Claude Code opens several
+        // turns at once, so without this re-check a single exhausted window is
+        // reported once per parallel turn and backs the account off that many
+        // times over.
         continue;
       }
 
@@ -142,28 +161,50 @@ export class AccountLease {
     reason: string,
   ): void {
     const key = cooldownKey(accountId, modelId);
-    const strikes = (this.cooldowns.get(key)?.strikes ?? 0) + 1;
+    const existing = this.cooldowns.get(key);
+    const now = Date.now();
     const capMs = Math.max(BASE_COOLDOWN_MS, Config.rotationCooldownMinutes() * 60_000);
+
+    // Parallel requests all learn about the same exhausted window at the same
+    // moment, so a limit that lands while the account is *already* cooling down
+    // is that one window being reported again — not a fresh offence. Counting
+    // it turned one burst of three turns into a four-minute lockout over a
+    // sixty-second window.
+    const strikes =
+      existing === undefined || now - existing.until > STRIKE_MEMORY_MS
+        ? 1
+        : existing.until > now
+          ? existing.strikes
+          : existing.strikes + 1;
+
     // Without a `retry-after` the wait doubles per consecutive rate limit, so a
     // one-off blip costs 30s while a genuinely exhausted account backs off to
     // the configured maximum.
     const durationMs = retryAfterSeconds
       ? retryAfterSeconds * 1000
       : Math.min(BASE_COOLDOWN_MS * 2 ** (strikes - 1), capMs);
-    this.cooldowns.set(key, { until: Date.now() + durationMs, reason, strikes });
+    // A concurrent report must never shorten a wait already in force.
+    const until = Math.max(now + durationMs, existing?.until ?? 0);
+    this.cooldowns.set(key, { until, reason, strikes });
   }
 
   /** Remaining cooldown in seconds, or 0 when the account is usable. */
   cooldownSeconds(accountId: string, modelId: string): number {
-    const cooldown = this.cooldowns.get(cooldownKey(accountId, modelId));
+    const key = cooldownKey(accountId, modelId);
+    const cooldown = this.cooldowns.get(key);
     if (!cooldown) {
       return 0;
     }
-    if (cooldown.until <= Date.now()) {
-      this.cooldowns.delete(cooldownKey(accountId, modelId));
+    const remainingMs = cooldown.until - Date.now();
+    if (remainingMs <= 0) {
+      // The lapsed record is kept for its strike count — dropping it here is
+      // what stopped the backoff from ever escalating on a repeat offender.
+      if (-remainingMs > STRIKE_MEMORY_MS) {
+        this.cooldowns.delete(key);
+      }
       return 0;
     }
-    return Math.ceil((cooldown.until - Date.now()) / 1000);
+    return Math.ceil(remainingMs / 1000);
   }
 
   clearCooldowns(): void {
@@ -173,6 +214,43 @@ export class AccountLease {
   /** Forget an account's rate-limit history once it serves a request again. */
   private clearCooldown(accountId: string, modelId: string): void {
     this.cooldowns.delete(cooldownKey(accountId, modelId));
+  }
+
+  /**
+   * Hold a request until a cooling-down account comes back, when the wait is
+   * short enough to be worth it.
+   *
+   * A rate-limit window is usually a minute or less, and reporting it straight
+   * back turned it into a visible failure: the client retried at once, found
+   * the same cooldown, and the user saw a run of errors for what was really a
+   * short pause. Returns true when it is worth re-ordering the candidates.
+   */
+  private async waitForRecovery(
+    requestedModel: string,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    const budgetSeconds = Config.rotationMaxWaitSeconds();
+    const wait = this.shortestCooldown(requestedModel);
+    if (budgetSeconds <= 0 || wait === undefined || wait > budgetSeconds || signal?.aborted) {
+      return false;
+    }
+
+    // Everything queued behind one window would otherwise resume in lockstep
+    // and exhaust it again on the first tick, so the resumes are spread out.
+    const delayMs = wait * 1000 + Math.floor(Math.random() * 1000);
+    Logger.info(`Every account is cooling down on '${requestedModel}'; waiting ${wait}s`);
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(finish, delayMs);
+      function finish() {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', finish);
+        resolve();
+      }
+      signal?.addEventListener('abort', finish, { once: true });
+    });
+
+    return !signal?.aborted;
   }
 
   /** Shortest wait across every account that could serve the model. */
