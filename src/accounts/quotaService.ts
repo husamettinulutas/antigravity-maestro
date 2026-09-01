@@ -121,7 +121,7 @@ async function fetchAvailableModels(
           requestOptions(accessToken),
         );
         return {
-          models: toModelQuotas(data.models),
+          models: toModelQuotas(data.models, data.deprecatedModelIds),
           forwardingRules: toForwardingRules(data.deprecatedModelIds),
         };
       } catch (error) {
@@ -191,11 +191,27 @@ function requestOptions(accessToken: string) {
   };
 }
 
-function toModelQuotas(models: FetchModelsResponse['models']): Record<string, ModelQuota> {
+/**
+ * The models the account can call, dropping the ones the upstream reports as
+ * deprecated. A retired model keeps its quota entry for a while and still
+ * looks live, but generating with it returns a "no longer available" notice
+ * instead of an answer — so it is dropped here, at the single point every
+ * model list is built from, rather than being offered and then failing.
+ */
+function toModelQuotas(
+  models: FetchModelsResponse['models'],
+  deprecated: FetchModelsResponse['deprecatedModelIds'],
+): Record<string, ModelQuota> {
   const result: Record<string, ModelQuota> = {};
+  const retired = new Set(Object.keys(deprecated ?? {}));
+  const dropped: string[] = [];
 
   for (const [modelId, info] of Object.entries(models ?? {})) {
     if (!TRACKED_MODEL_PREFIX.test(modelId) || !info?.quotaInfo) {
+      continue;
+    }
+    if (retired.has(modelId)) {
+      dropped.push(modelId);
       continue;
     }
     result[modelId] = {
@@ -229,6 +245,20 @@ function toModelQuotas(models: FetchModelsResponse['models']): Record<string, Mo
       percent: quota.percentage,
     })),
   );
+
+  // Logged whole, not just what was dropped: an id the upstream retires
+  // without listing here is the case this filter cannot catch, and comparing
+  // the two lists is how that gets spotted.
+  if (retired.size > 0) {
+    Logger.debug(
+      'Models retired upstream',
+      [...retired].map((modelId) => ({
+        id: modelId,
+        replacedBy: deprecated?.[modelId]?.newModelId ?? null,
+        wasListed: dropped.includes(modelId),
+      })),
+    );
+  }
 
   return result;
 }

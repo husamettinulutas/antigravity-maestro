@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.9
+
+- **A model the upstream has retired is no longer offered.** Google keeps a
+  retired model in `fetchAvailableModels` for a while, quota reading and all, so
+  it looked live in every picker — but generating with it returns the notice
+  "Gemini 3.5 Flash is no longer available. Please switch to Gemini 3.7 Flash"
+  in place of an answer. The same response already names the retired ids in
+  `deprecatedModelIds`; that field was being parsed and stored and then read by
+  nothing. Those ids are now dropped from the quota snapshot, which is the one
+  source the model picker, the accounts panel and the quota pools all build
+  from, so a dead model disappears from all three at once.
+
+  Deliberately not done: forwarding a request for a retired model onto its
+  replacement. The upstream reports what each retirement was replaced by, but
+  silently answering from a different model than the one picked would be
+  invisible in the reply and would spend the other model's quota.
+
+- **What the upstream retires is logged.** `Models retired upstream` (at debug
+  level) lists every id Google reports as deprecated, its replacement, and
+  whether it was among the models offered. A model that stops working without
+  appearing in that list is one this filter cannot catch, and comparing the two
+  is how that gets spotted.
+
 ## 1.0.8
 
 - **Requests no longer go to the host that refuses them.** Generate calls were
