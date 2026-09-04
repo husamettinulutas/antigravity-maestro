@@ -227,10 +227,10 @@
         },
         "antigravityMaestro.rotation.maxWaitSeconds": {
           "type": "number",
-          "default": 15,
+          "default": 60,
           "minimum": 0,
-          "maximum": 120,
-          "description": "How long a request may wait for a cooling-down account to recover before failing. Waiting briefly keeps a short rate-limit window from surfacing as an error in Claude Code. Set to 0 to fail immediately."
+          "maximum": 300,
+          "description": "How long a request may wait for a cooling-down account to recover before failing. These endpoints ask for around 30 seconds when they rate limit, so a shorter budget than that never waits at all and reports the window as an error instead. Set to 0 to fail immediately."
         },
         "antigravityMaestro.maxConcurrentRequestsPerAccount": {
           "type": "number",

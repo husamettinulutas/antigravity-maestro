@@ -16,6 +16,8 @@ import { Logger } from '../utils/logger';
 
 /** Refuse request bodies larger than this — a runaway client would exhaust memory. */
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
+/** What a client is told to wait when every account was refused upstream. */
+const FORBIDDEN_RETRY_AFTER_SECONDS = 60;
 /** Rough characters-per-token ratio for count_tokens. */
 const CHARS_PER_TOKEN = 3.7;
 
@@ -437,6 +439,21 @@ export class GatewayServer {
       return;
     }
     if (error instanceof UpstreamError) {
+      // An upstream 401/403 is about the Google account, not about the key the
+      // caller presented to this gateway. Passing the status through told
+      // Claude Code and Codex that their *own* credentials had been rejected,
+      // and they signed themselves out over an account that had merely run out
+      // or needed verifying. It is reported as an upstream failure instead.
+      if (error.isAuthFailure || error.isForbidden) {
+        Logger.warn(`Upstream refused every account (${error.status}): ${error.message}`);
+        sendJson(
+          res,
+          503,
+          errorBody('overloaded_error', `Antigravity refused the request: ${error.message}`),
+          retryAfterHeader(error.retryAfterSeconds ?? FORBIDDEN_RETRY_AFTER_SECONDS),
+        );
+        return;
+      }
       const status = error.isRateLimit ? 429 : (error.status ?? 502);
       Logger.warn(`Upstream error ${status}: ${error.message}`);
       sendJson(res, status, errorBody(errorTypeFor(status), error.message), {

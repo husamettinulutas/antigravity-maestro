@@ -46,9 +46,16 @@ export class EventEmitter<T> {
   dispose(): void {}
 }
 
+/**
+ * Settings a test wants to pin. Anything left unset reads its real default, so
+ * a test only says what it actually depends on.
+ */
+export const testSettings: Record<string, unknown> = {};
+
 export const workspace = {
   getConfiguration: () => ({
-    get: <T>(_key: string, fallback: T) => fallback,
+    get: <T>(key: string, fallback: T) =>
+      key in testSettings ? (testSettings[key] as T) : fallback,
     update: async () => undefined,
     inspect: () => undefined,
   }),

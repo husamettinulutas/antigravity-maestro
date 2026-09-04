@@ -284,6 +284,70 @@ test('endpoints: only one request pays to discover the project header verdict', 
   }
 });
 
+test('endpoints: the header verdict survives a rate limit on the retry', async () => {
+  resetEndpointHealth();
+  const original = http.request;
+  let forbidden = 0;
+
+  // The header is genuinely refused, and the request sent without it then runs
+  // into the account's rate limit — the shape a spent account produces.
+  http.request = async (_url: string, options: { headers: Record<string, string> }) => {
+    if (options.headers['x-goog-user-project'] !== undefined) {
+      forbidden += 1;
+      throw new http.HttpError('HTTP 403: project not allowed', 403, '', {});
+    }
+    throw rateLimited();
+  };
+
+  try {
+    const client = new CloudCodeClient();
+    await assert.rejects(client.generate(params({ projectId: 'project-1' })));
+    await assert.rejects(client.generate(params({ projectId: 'project-1' })));
+
+    // Getting past the permission check and being metered is proof enough that
+    // the header was the problem, so the second request must not pay for the
+    // same doomed round trip again.
+    assert.equal(forbidden, 1, `expected a single 403, saw ${forbidden}`);
+  } finally {
+    http.request = original;
+    resetEndpointHealth();
+  }
+});
+
+test('endpoints: a 403 about the account is not blamed on the project header', async () => {
+  resetEndpointHealth();
+  const original = http.request;
+  const sentHeaders: (string | undefined)[] = [];
+
+  http.request = async (_url: string, options: { headers: Record<string, string> }) => {
+    sentHeaders.push(options.headers['x-goog-user-project']);
+    throw new http.HttpError('HTTP 403: Verify your account to continue.', 403, '', {});
+  };
+
+  try {
+    const client = new CloudCodeClient();
+    await assert.rejects(client.generate(params({ projectId: 'project-1' })), (error: any) => {
+      assert.equal(error.status, 403);
+      assert.equal(error.isForbidden, true);
+      assert.equal(error.needsUserAction, true);
+      return true;
+    });
+
+    // Retrying without the header answers identically, so the round trip is
+    // not spent; the caller rotates to another account instead.
+    assert.deepEqual(sentHeaders, ['project-1']);
+
+    // And the verdict is not remembered: an account-level refusal used to
+    // strip the header off every later request for that project for an hour,
+    // which is how one exhausted account took the rest down with it.
+    await assert.rejects(client.generate(params({ projectId: 'project-1' })));
+    assert.deepEqual(sentHeaders, ['project-1', 'project-1']);
+  } finally {
+    http.request = original;
+    resetEndpointHealth();
+  }
+});
+
 test('endpoints: an unhealthy primary is skipped on the next request', async () => {
   resetEndpointHealth();
   const transport = stubTransport((url) => (url.startsWith(PRIMARY) ? unavailable() : ok()));

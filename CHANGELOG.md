@@ -2,6 +2,97 @@
 
 ## 1.0.9
 
+- **A spent account is no longer the one every request starts on.** Candidate
+  ordering put the active account first and only skipped accounts that were
+  already cooling down, so the account the user had just watched drop to 0% in
+  the panel still took the first request of every turn, earned a rate limit,
+  and only then let the rotation begin. An account whose quota for the model
+  reads empty is now tried last — demoted rather than dropped, so a stale or
+  missing reading can never leave a request with nowhere to go.
+
+- **A window that closes mid-request is waited out instead of failing the
+  turn.** The short wait that keeps a rate-limit window from surfacing as an
+  error was only consulted before the first account was tried: if every account
+  ran out *during* the request — which is what a burst of parallel turns
+  produces — the last 429 was thrown as-is. The wait is now taken once after
+  the candidates are exhausted too, and the whole selection is re-ordered
+  afterwards.
+
+  `rotation.maxWaitSeconds` now defaults to 60 rather than 15. These endpoints
+  ask for around 30 seconds when they meter an account, so the old budget was
+  shorter than the window it was meant to ride out and never waited at all.
+
+- **A rate limit that outlasts the wait is reported as a wait.** Running out on
+  every account surfaced as the raw `HTTP 429: Resource has been exhausted` and
+  a stack trace in the chat. It now arrives as the sentence that says which
+  model is out and how many seconds to leave it, with the `retry-after` the
+  upstream asked for attached.
+
+- **An account the upstream refuses no longer takes the whole session down.**
+  When one account ran out, the endpoints answered its next request with
+  `HTTP 403: Verify your account to continue.` Three things then went wrong in
+  a row, and together they left every model in every client reporting 403:
+
+  - The rotation stopped at the 403. Only 429 and 401 were treated as "another
+    account could serve this"; a 403 was assumed to fail identically everywhere
+    and was rethrown, so the remaining signed-in accounts were never tried.
+    A 403 is now a per-account refusal like the others — the account is put on a
+    five-minute cooldown and the next one is tried.
+
+  - Every 403 was blamed on the project header. Any 403 on a request carrying
+    `x-goog-user-project` was read as the upstream rejecting that header, and
+    the verdict was remembered for an hour before it had been tested — so an
+    account-level refusal stripped the header off every later request for that
+    project, for every account sharing it. The header is now only dropped for a
+    403 that could plausibly be about it, and the rejection is recorded only
+    once the request sent without it has got past the permission check.
+
+  - The status was handed to the client verbatim. The gateway forwarded an
+    upstream 403 as a 403 `authentication_error`, which is how Claude Code and
+    Codex are told *their own* credentials are bad — so they signed themselves
+    out over a Google account that had merely run out or needed verifying. An
+    upstream 401 or 403 is now reported as a 503 `overloaded_error` carrying the
+    upstream's own message, which clients retry instead of logging out over.
+
+- **"Every account is rate limited" is no longer said about accounts that were
+  not.** The message shown when nothing can serve a model now carries the reason
+  the soonest-recovering account is unavailable, so a refusal that needs the
+  user to verify an account does not send them looking at quotas that were
+  never the problem.
+
+- **An account the upstream refuses no longer takes the whole session down.**
+  When one account ran out, the endpoints answered its next request with
+  `HTTP 403: Verify your account to continue.` Three things then went wrong in
+  a row, and together they left every model in every client reporting 403:
+
+  - The rotation stopped at the 403. Only 429 and 401 were treated as "another
+    account could serve this"; a 403 was assumed to fail identically everywhere
+    and was rethrown, so the remaining signed-in accounts were never tried.
+    A 403 is now a per-account refusal like the others — the account is put on a
+    five-minute cooldown and the next one is tried.
+
+  - Every 403 was blamed on the project header. Any 403 on a request carrying
+    `x-goog-user-project` was read as the upstream rejecting that header, which
+    bought a second doomed round trip without it and then remembered the verdict
+    for an hour — so an account-level refusal stripped the header off every
+    later request for that project, for every account sharing it. The header is
+    now only dropped for a 403 that could plausibly be about it, and the
+    rejection is recorded only once the header-less retry has actually
+    succeeded.
+
+  - The status was handed to the client verbatim. The gateway forwarded an
+    upstream 403 as a 403 `authentication_error`, which is how Claude Code and
+    Codex are told *their own* credentials are bad — so they signed themselves
+    out over a Google account that had merely run out or needed verifying. An
+    upstream 401 or 403 is now reported as a 503 `overloaded_error` carrying the
+    upstream's own message, which clients retry instead of logging out over.
+
+- **"Every account is rate limited" is no longer said about accounts that were
+  not.** The message shown when nothing can serve a model now carries the reason
+  the soonest-recovering account is unavailable, so a refusal that needs the
+  user to verify an account does not send them looking at quotas that were
+  never the problem.
+
 - **A model the upstream has retired is no longer offered.** Google keeps a
   retired model in `fetchAvailableModels` for a while, quota reading and all, so
   it looked live in every picker — but generating with it returns the notice

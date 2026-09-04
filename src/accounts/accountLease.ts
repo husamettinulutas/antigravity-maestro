@@ -38,6 +38,16 @@ interface Cooldown {
 const BASE_COOLDOWN_MS = 30_000;
 
 /**
+ * How long an account is skipped after the upstream refused it outright.
+ *
+ * A 403 is not a rate limit and does not lift on its own within a window, so
+ * it gets a flat wait rather than the escalating one: long enough that a
+ * blocked account stops costing every turn a doomed round trip, short enough
+ * that an account the user has just verified is picked back up on its own.
+ */
+const FORBIDDEN_COOLDOWN_SECONDS = 5 * 60;
+
+/**
  * How long a lapsed cooldown is remembered. The record has to outlive its own
  * expiry, otherwise the strike count is gone by the time the account is next
  * tried and a genuinely exhausted account backs off by the base wait forever.
@@ -61,26 +71,59 @@ export class AccountLease {
   /**
    * Run `execute` against the best available account for `requestedModel`.
    * Rate limited accounts are put on cooldown and the next candidate is tried.
+   *
+   * When every account runs out mid-request the shortest window is waited out
+   * once and the whole selection is retried, because that window is usually
+   * seconds long: reporting it straight back is what turned a burst of
+   * parallel turns into a failed one.
    */
   async run<T>(
     requestedModel: string,
     execute: (context: LeaseContext) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T> {
-    let candidates = this.orderCandidates(requestedModel);
-    if (candidates.length === 0 && (await this.waitForRecovery(requestedModel, signal))) {
-      candidates = this.orderCandidates(requestedModel);
-    }
-    if (candidates.length === 0) {
+    let lastError: unknown;
+    let waited = false;
+
+    for (;;) {
+      const candidates = this.orderCandidates(requestedModel);
+      if (candidates.length > 0) {
+        const outcome = await this.tryCandidates(requestedModel, candidates, execute);
+        if (outcome.served) {
+          return outcome.result as T;
+        }
+        lastError = outcome.error ?? lastError;
+      }
+
       // Sending anyway would earn another rate limit and burn more quota, so
-      // the wait is reported instead — that is what stops a retrying client
-      // from hammering an account that is already out of headroom.
-      throw new NoAccountAvailableError(
-        this.explainNoCandidates(requestedModel),
-        this.shortestCooldown(requestedModel),
-      );
+      // the wait is taken here or reported to the client — that is what stops
+      // a retrying client from hammering an account with no headroom left.
+      if (!waited && (await this.waitForRecovery(requestedModel, signal))) {
+        waited = true;
+        continue;
+      }
+      break;
     }
 
+    // A rate limit that outlasts the wait is reported as a wait, not as the
+    // raw upstream failure: the client gets the seconds to come back in, and
+    // the user gets a sentence instead of a 429 stack trace.
+    const retryAfter = this.shortestCooldown(requestedModel);
+    if (retryAfter !== undefined || lastError === undefined) {
+      throw new NoAccountAvailableError(this.explainNoCandidates(requestedModel), retryAfter);
+    }
+    throw lastError;
+  }
+
+  /**
+   * Try each candidate in turn. Returns without a result once they have all
+   * refused in a way another account could survive; anything else is thrown.
+   */
+  private async tryCandidates<T>(
+    requestedModel: string,
+    candidates: AccountMetadata[],
+    execute: (context: LeaseContext) => Promise<T>,
+  ): Promise<{ served: boolean; result?: T; error?: unknown }> {
     let lastError: unknown;
 
     for (const account of candidates) {
@@ -110,7 +153,7 @@ export class AccountLease {
 
         this.clearCooldown(account.id, model.id);
         await this.promoteIfRotated(account);
-        return result;
+        return { served: true, result };
       } catch (error) {
         lastError = error;
 
@@ -123,19 +166,35 @@ export class AccountLease {
           Logger.warn(`${account.email} was rejected with 401; trying another account`);
           continue;
         }
+        if (error instanceof UpstreamError && error.isForbidden) {
+          // A 403 is the upstream refusing this account — one that has run out
+          // of its allowance for good, or needs verifying — not a bad request,
+          // so every other account is still worth trying. Rotating here is
+          // what stops a single blocked account from failing the whole
+          // session, and the cooldown stops each parallel turn from
+          // rediscovering the same refusal.
+          this.markCooldown(
+            account.id,
+            model.id,
+            error.retryAfterSeconds ?? FORBIDDEN_COOLDOWN_SECONDS,
+            error.message,
+          );
+          Logger.warn(
+            `${account.email} was refused on ${model.id} (403: ${error.message}); ` +
+              'trying another account' +
+              (error.needsUserAction
+                ? ' — this one stays refused until it is verified or added again'
+                : ''),
+          );
+          continue;
+        }
         // Anything else (bad request, upstream outage) would fail identically
         // on every account — surface it instead of burning through them.
         throw error;
       }
     }
 
-    if (lastError) {
-      throw lastError;
-    }
-    throw new NoAccountAvailableError(
-      this.explainNoCandidates(requestedModel),
-      this.shortestCooldown(requestedModel),
-    );
+    return { served: false, error: lastError };
   }
 
   /** Record the token spend of a completed request. */
@@ -253,6 +312,25 @@ export class AccountLease {
     return !signal?.aborted;
   }
 
+  /** Why the soonest-recovering account is unavailable, when it is known. */
+  private reasonFor(requestedModel: string): string | undefined {
+    let soonest: Cooldown | undefined;
+    for (const account of this.accounts.list()) {
+      if (account.needsReauth) {
+        continue;
+      }
+      const model = this.catalog.resolve(requestedModel, account.id);
+      if (!model) {
+        continue;
+      }
+      const cooldown = this.cooldowns.get(cooldownKey(account.id, model.id));
+      if (cooldown && cooldown.until > Date.now() && (!soonest || cooldown.until < soonest.until)) {
+        soonest = cooldown;
+      }
+    }
+    return soonest?.reason;
+  }
+
   /** Shortest wait across every account that could serve the model. */
   private shortestCooldown(requestedModel: string): number | undefined {
     const waits = this.accounts
@@ -300,7 +378,19 @@ export class AccountLease {
         : this.rotate(fallbacks);
 
     const activeIsUsable = active !== undefined && usable.some((a) => a.id === active.id);
-    return activeIsUsable ? [active!, ...ordered] : ordered;
+    const candidates = activeIsUsable ? [active!, ...ordered] : ordered;
+
+    // An account whose quota for this model already reads empty goes last,
+    // however it was ordered. Starting on one spends a doomed request and
+    // earns a rate limit before the rotation has even begun, and the active
+    // account — always tried first — is the usual victim: it is the one the
+    // user just watched run out. They are demoted rather than dropped, because
+    // a stale or missing reading must never be what leaves a request with
+    // nowhere to go.
+    const spent = candidates.filter((account) => !this.hasHeadroom(account, requestedModel));
+    return spent.length === 0
+      ? candidates
+      : [...candidates.filter((account) => this.hasHeadroom(account, requestedModel)), ...spent];
   }
 
   /** True when the account can serve the model right now. */
@@ -319,6 +409,12 @@ export class AccountLease {
     const offset = this.roundRobinIndex % accounts.length;
     this.roundRobinIndex = (this.roundRobinIndex + 1) % accounts.length;
     return [...accounts.slice(offset), ...accounts.slice(0, offset)];
+  }
+
+  /** False only when the account's quota for this model is known to be spent. */
+  private hasHeadroom(account: AccountMetadata, requestedModel: string): boolean {
+    const percent = this.catalog.resolve(requestedModel, account.id)?.quotaPercent;
+    return percent === undefined || percent > 0;
   }
 
   private quotaOf(account: AccountMetadata, requestedModel: string): number {
@@ -348,7 +444,14 @@ export class AccountLease {
     }
     const wait = this.shortestCooldown(requestedModel);
     if (wait !== undefined) {
-      return `Every account is rate limited on this model. Try again in ${wait}s.`;
+      // The reason is carried through because a cooldown is no longer always a
+      // rate limit: an account the upstream refused outright cools down too,
+      // and reporting that as "rate limited" sent the user looking at quotas
+      // that were never the problem.
+      const reason = this.reasonFor(requestedModel);
+      return reason
+        ? `Every account is unavailable for this model (${reason}). Try again in ${wait}s.`
+        : `Every account is rate limited on this model. Try again in ${wait}s.`;
     }
     return 'No account currently has quota for this model. Refresh quotas or wait for the reset.';
   }

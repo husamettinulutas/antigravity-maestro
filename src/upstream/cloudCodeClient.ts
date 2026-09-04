@@ -199,6 +199,37 @@ export class UpstreamError extends Error {
   get isAuthFailure(): boolean {
     return this.status === 401;
   }
+
+  /**
+   * True when the upstream refused this *account* rather than the request.
+   *
+   * Another account can still serve, and — the part that matters to the
+   * callers — the client's own credentials are not what was rejected.
+   */
+  get isForbidden(): boolean {
+    return this.status === 403;
+  }
+
+  /** True when only the account holder can clear the refusal. */
+  get needsUserAction(): boolean {
+    return this.status === 403 && ACCOUNT_LEVEL_403.test(`${this.message} ${this.body}`);
+  }
+}
+
+/**
+ * 403 bodies that name the account, not the request.
+ *
+ * The endpoints answer with 403 both when they dislike `x-goog-user-project`
+ * and when they have refused the account itself, and the two need opposite
+ * handling: the first is fixed by dropping a header, the second only by using
+ * a different account.
+ */
+const ACCOUNT_LEVEL_403 =
+  /verify your account|verification (is )?required|age verification|account (has been |is )?(suspended|disabled|closed|blocked)|not eligible|user location is not supported|not available in your (country|region)/i;
+
+/** Whether a 403 could plausibly be about the project header. */
+function couldBeProjectRejection(error: HttpError): boolean {
+  return !ACCOUNT_LEVEL_403.test(`${error.message} ${error.body}`);
 }
 
 /**
@@ -278,7 +309,7 @@ export class CloudCodeClient {
     }
 
     try {
-      return await this.attempt(path, params, serialized, endProbe);
+      return await this.attempt(path, params, serialized);
     } finally {
       // Settles on the response headers, not the end of the stream: by then the
       // verdict is in, and a request that failed for some other reason simply
@@ -287,15 +318,31 @@ export class CloudCodeClient {
     }
   }
 
-  private async attempt(
-    path: string,
-    params: GenerateParams,
-    serialized: string,
-    endProbe: (() => void) | undefined,
-  ) {
+  private async attempt(path: string, params: GenerateParams, serialized: string) {
     let projectHeaderDisabled =
       params.projectId !== undefined && projectHeaderIsRejected(params.projectId);
+    /** Set once the header has been dropped; confirmed by what came back. */
+    let pendingRejection: string | undefined;
     let lastError: unknown;
+
+    /**
+     * Remember that the project header was the problem — but only when the
+     * request sent without it got past the permission check. Being served
+     * proves it, and so does any other refusal (a rate limit says the caller
+     * was allowed in and then metered). Another 403 proves nothing about the
+     * header, which is how an account-level refusal used to take a project's
+     * header out of every request for an hour.
+     */
+    const settleProjectVerdict = (error?: unknown) => {
+      if (pendingRejection === undefined) {
+        return;
+      }
+      if (error instanceof HttpError && error.status === 403) {
+        return;
+      }
+      rejectedProjects.set(pendingRejection, Date.now());
+      pendingRejection = undefined;
+    };
 
     // Two passes: the second one runs only when the project header was the
     // reason for a 403.
@@ -320,20 +367,24 @@ export class CloudCodeClient {
           });
           // Serving a request clears any doubt about this host.
           degradedEndpoints.delete(baseUrl);
+          settleProjectVerdict();
           return response;
         } catch (error) {
           lastError = error;
 
+          // Only the project header is worth a second pass. A 403 that names
+          // the account ("Verify your account to continue") comes back
+          // identically without the header, so it is surfaced straight away
+          // and the caller rotates to a different account instead.
           if (
             !projectHeaderDisabled &&
             error instanceof HttpError &&
             error.status === 403 &&
-            params.projectId
+            params.projectId &&
+            couldBeProjectRejection(error)
           ) {
             Logger.warn('Upstream rejected the project header; retrying without it');
-            rejectedProjects.set(params.projectId, Date.now());
-            // The verdict is in — anything queued behind the probe can go now.
-            endProbe?.();
+            pendingRejection = params.projectId;
             projectHeaderDisabled = true;
             justDisabledProjectHeader = true;
             break;
@@ -341,6 +392,7 @@ export class CloudCodeClient {
 
           const hasNextEndpoint = index + 1 < endpoints.length;
           if (!hasNextEndpoint || !shouldFailover(error)) {
+            settleProjectVerdict(error);
             throw toUpstreamError(error);
           }
           // Only demote when a later endpoint can still be tried — a failure
@@ -362,6 +414,7 @@ export class CloudCodeClient {
       }
     }
 
+    settleProjectVerdict(lastError);
     throw toUpstreamError(lastError);
   }
 

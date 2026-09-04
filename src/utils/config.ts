@@ -8,7 +8,7 @@ export const Config = {
   rotationStrategy: (): 'manual' | 'round-robin' | 'highest-quota-first' =>
     get('rotation.strategy', 'highest-quota-first'),
   rotationCooldownMinutes: (): number => get<number>('rotation.cooldownMinutes', 15),
-  rotationMaxWaitSeconds: (): number => get<number>('rotation.maxWaitSeconds', 15),
+  rotationMaxWaitSeconds: (): number => get<number>('rotation.maxWaitSeconds', 60),
   maxConcurrentRequestsPerAccount: (): number =>
     get<number>('maxConcurrentRequestsPerAccount', 3),
   requestTimeoutMs: (): number => get<number>('requestTimeoutSeconds', 120) * 1000,
