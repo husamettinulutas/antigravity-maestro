@@ -128,7 +128,10 @@ export class ModelCatalog {
    * available model of the same family.
    */
   resolve(requestedId: string, accountId?: string): CatalogModel | undefined {
-    const models = this.list(accountId);
+    let models = this.list(accountId);
+    if (models.length === 0) {
+      models = this.borrowedModels(accountId);
+    }
     if (models.length === 0) {
       return undefined;
     }
@@ -154,6 +157,31 @@ export class ModelCatalog {
     }
 
     return models.filter((model) => model.supportsTools).sort(compareModels)[0];
+  }
+
+  /**
+   * The models an account with no quota snapshot is assumed to serve.
+   *
+   * A catalog is built from the account's own quota reading, and an account
+   * whose reading never arrived — the quota endpoints refused a burst of
+   * refreshes, say — had no catalog at all, so the rotation passed it over
+   * without a word and "every account" came to mean the one or two that had
+   * been read. Until its own reading lands, such an account is offered what
+   * the other accounts are known to serve, with their quota figures stripped
+   * so nothing about them is mistaken for a reading of this one. An account
+   * the upstream has refused (`isForbidden`) keeps its empty list.
+   */
+  private borrowedModels(accountId?: string): CatalogModel[] {
+    const account = accountId ? this.accounts.get(accountId) : this.accounts.getActive();
+    if (!account || account.quota !== undefined) {
+      return [];
+    }
+    return this.listAll().map((model) => ({
+      ...model,
+      quotaPercent: undefined,
+      accountEmail: undefined,
+      resetTime: undefined,
+    }));
   }
 
   /** Output/thinking limits for a model id, even when it is not in the catalog. */

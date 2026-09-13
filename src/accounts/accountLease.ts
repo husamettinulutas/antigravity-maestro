@@ -55,11 +55,51 @@ const FORBIDDEN_COOLDOWN_SECONDS = 5 * 60;
 const STRIKE_MEMORY_MS = 10 * 60_000;
 
 /**
+ * Consecutive accounts refused with a rate limit before the limit is read as
+ * the client's rather than any one account's.
+ *
+ * The endpoints also meter the caller as a whole — the production host in
+ * particular answers `RESOURCE_EXHAUSTED` regardless of which account signs
+ * the request. Treating each of those as a per-account refusal walked the
+ * rotation through every signed-in account, spent a doomed request on each,
+ * put all of them on cooldown, and reported "every account is unavailable"
+ * over a limit no account had earned. Three healthy-looking accounts refused
+ * in a row with the same wait is that limit, not three coincidences.
+ */
+const SHARED_LIMIT_STRIKES = 3;
+
+/** Retry delays this close together are the same window being reported. */
+const SHARED_LIMIT_SPREAD_SECONDS = 5;
+
+interface SharedCooldown {
+  until: number;
+  reason: string;
+}
+
+/** One rate limit in the current sweep, for spotting a shared window. */
+interface RateLimitStrike {
+  modelId: string;
+  retryAfterSeconds: number | undefined;
+}
+
+/** How the accounts split when nothing could serve a request. */
+interface AccountSummary {
+  total: number;
+  needsReauth: number;
+  noCatalog: number;
+  coolingDown: number;
+  /** Cooling down because the upstream refused the account (403). */
+  refused: number;
+}
+
+/**
  * Picks the account each request runs on and retries on another one when the
  * chosen account is rate limited or out of quota.
  */
 export class AccountLease {
   private readonly cooldowns = new Map<string, Cooldown>();
+  /** Windows that apply to the client as a whole, keyed by upstream model id. */
+  private readonly sharedCooldowns = new Map<string, SharedCooldown>();
   private roundRobinIndex = 0;
 
   constructor(
@@ -125,6 +165,7 @@ export class AccountLease {
     execute: (context: LeaseContext) => Promise<T>,
   ): Promise<{ served: boolean; result?: T; error?: unknown }> {
     let lastError: unknown;
+    const strikes: RateLimitStrike[] = [];
 
     for (const account of candidates) {
       const model = this.catalog.resolve(requestedModel, account.id);
@@ -159,9 +200,27 @@ export class AccountLease {
 
         if (error instanceof UpstreamError && error.isRateLimit) {
           this.markCooldown(account.id, model.id, error.retryAfterSeconds, error.message);
+          strikes.push({ modelId: model.id, retryAfterSeconds: error.retryAfterSeconds });
+
+          if (looksShared(strikes)) {
+            // The rest of the list would only add a doomed request per account
+            // to a limit that is not theirs — and, since every request from
+            // this install counts against it, push the window further out.
+            this.markSharedCooldown(model.id, error.retryAfterSeconds, error.message);
+            Logger.warn(
+              `${strikes.length} accounts in a row were rate limited on ${model.id} with the ` +
+                'same wait; treating it as a limit on this client rather than on the accounts ' +
+                `and leaving ${candidates.length - strikes.length} untried`,
+            );
+            return { served: false, error };
+          }
+
           Logger.warn(`${account.email} is rate limited on ${model.id}; trying another account`);
           continue;
         }
+        // A refusal that is about the account breaks the run of identical
+        // rate limits — whatever comes after it is a fresh observation.
+        strikes.length = 0;
         if (error instanceof UpstreamError && error.isAuthFailure) {
           Logger.warn(`${account.email} was rejected with 401; trying another account`);
           continue;
@@ -247,8 +306,32 @@ export class AccountLease {
     this.cooldowns.set(key, { until, reason, strikes });
   }
 
-  /** Remaining cooldown in seconds, or 0 when the account is usable. */
+  /**
+   * Put a model on cooldown for every account at once, because the limit that
+   * came back was the client's rather than the account's.
+   */
+  markSharedCooldown(modelId: string, retryAfterSeconds: number | undefined, reason: string): void {
+    const now = Date.now();
+    const durationMs = retryAfterSeconds ? retryAfterSeconds * 1000 : BASE_COOLDOWN_MS;
+    const existing = this.sharedCooldowns.get(modelId);
+    this.sharedCooldowns.set(modelId, {
+      until: Math.max(now + durationMs, existing?.until ?? 0),
+      reason: `this client, not one account, is rate limited: ${reason}`,
+    });
+  }
+
+  /**
+   * Remaining cooldown in seconds, or 0 when the account is usable. Covers both
+   * the account's own window and one the whole client is inside.
+   */
   cooldownSeconds(accountId: string, modelId: string): number {
+    return Math.max(
+      this.accountCooldownSeconds(accountId, modelId),
+      this.sharedCooldownSeconds(modelId),
+    );
+  }
+
+  private accountCooldownSeconds(accountId: string, modelId: string): number {
     const key = cooldownKey(accountId, modelId);
     const cooldown = this.cooldowns.get(key);
     if (!cooldown) {
@@ -266,13 +349,29 @@ export class AccountLease {
     return Math.ceil(remainingMs / 1000);
   }
 
+  private sharedCooldownSeconds(modelId: string): number {
+    const cooldown = this.sharedCooldowns.get(modelId);
+    if (!cooldown) {
+      return 0;
+    }
+    const remainingMs = cooldown.until - Date.now();
+    if (remainingMs <= 0) {
+      this.sharedCooldowns.delete(modelId);
+      return 0;
+    }
+    return Math.ceil(remainingMs / 1000);
+  }
+
   clearCooldowns(): void {
     this.cooldowns.clear();
+    this.sharedCooldowns.clear();
   }
 
   /** Forget an account's rate-limit history once it serves a request again. */
   private clearCooldown(accountId: string, modelId: string): void {
     this.cooldowns.delete(cooldownKey(accountId, modelId));
+    // Being served proves the model is not walled off for the whole client.
+    this.sharedCooldowns.delete(modelId);
   }
 
   /**
@@ -314,7 +413,8 @@ export class AccountLease {
 
   /** Why the soonest-recovering account is unavailable, when it is known. */
   private reasonFor(requestedModel: string): string | undefined {
-    let soonest: Cooldown | undefined;
+    let soonest: { until: number; reason: string } | undefined;
+    const now = Date.now();
     for (const account of this.accounts.list()) {
       if (account.needsReauth) {
         continue;
@@ -323,12 +423,54 @@ export class AccountLease {
       if (!model) {
         continue;
       }
-      const cooldown = this.cooldowns.get(cooldownKey(account.id, model.id));
-      if (cooldown && cooldown.until > Date.now() && (!soonest || cooldown.until < soonest.until)) {
-        soonest = cooldown;
+      // A window on the whole client explains every account at once, so it is
+      // reported ahead of the account's own — which, for the accounts that
+      // were tried before it was recognised, describes the same refusal.
+      const own = this.cooldowns.get(cooldownKey(account.id, model.id));
+      const shared = this.sharedCooldowns.get(model.id);
+      const effective: { until: number; reason: string } | undefined =
+        shared && shared.until > now ? shared : own && own.until > now ? own : undefined;
+      if (effective && (!soonest || effective.until < soonest.until)) {
+        soonest = effective;
       }
     }
     return soonest?.reason;
+  }
+
+  /** How the accounts split for a model — what the error message reports. */
+  private summarize(requestedModel: string): AccountSummary {
+    const summary: AccountSummary = {
+      total: 0,
+      needsReauth: 0,
+      noCatalog: 0,
+      coolingDown: 0,
+      refused: 0,
+    };
+    for (const account of this.accounts.list()) {
+      summary.total += 1;
+      if (account.needsReauth) {
+        summary.needsReauth += 1;
+        continue;
+      }
+      const model = this.catalog.resolve(requestedModel, account.id);
+      if (!model) {
+        summary.noCatalog += 1;
+        continue;
+      }
+      if (this.cooldownSeconds(account.id, model.id) === 0) {
+        continue;
+      }
+      // "Verify your account to continue" is the account holder's to fix, and
+      // lumping it in with rate limits sent the user to wait out a window
+      // that was never going to close.
+      const own = this.cooldowns.get(cooldownKey(account.id, model.id));
+      if (own && own.until > Date.now() && /HTTP 403/.test(own.reason)) {
+        summary.refused += 1;
+      } else {
+        summary.coolingDown += 1;
+      }
+    }
+    return summary;
   }
 
   /** Shortest wait across every account that could serve the model. */
@@ -442,6 +584,11 @@ export class AccountLease {
     if (all.every((account) => account.needsReauth)) {
       return 'Every account needs to sign in again.';
     }
+    // "Every account" used to hide how many accounts were actually in the
+    // running: one whose quota was never fetched has no catalog and is passed
+    // over silently, so a single rate-limited account read as twelve. The
+    // split is spelled out so the user — and the log — can see which it was.
+    const breakdown = describeAccounts(this.summarize(requestedModel));
     const wait = this.shortestCooldown(requestedModel);
     if (wait !== undefined) {
       // The reason is carried through because a cooldown is no longer always a
@@ -450,13 +597,62 @@ export class AccountLease {
       // that were never the problem.
       const reason = this.reasonFor(requestedModel);
       return reason
-        ? `Every account is unavailable for this model (${reason}). Try again in ${wait}s.`
-        : `Every account is rate limited on this model. Try again in ${wait}s.`;
+        ? `Every account is unavailable for this model (${reason}). Try again in ${wait}s. ${breakdown}`
+        : `Every account is rate limited on this model. Try again in ${wait}s. ${breakdown}`;
     }
-    return 'No account currently has quota for this model. Refresh quotas or wait for the reset.';
+    return `No account currently has quota for this model. Refresh quotas or wait for the reset. ${breakdown}`;
   }
 }
 
 function cooldownKey(accountId: string, modelId: string): string {
   return `${accountId}::${modelId}`;
+}
+
+/**
+ * True when the run of rate limits reads as one window rather than several.
+ *
+ * Accounts run out independently, so their windows end at different times;
+ * a limit on the client comes back with the same wait for each. Delays that
+ * disagree are kept as per-account refusals, so a spent account does not stop
+ * the rotation from reaching a fresh one.
+ */
+function looksShared(strikes: RateLimitStrike[]): boolean {
+  if (strikes.length < SHARED_LIMIT_STRIKES) {
+    return false;
+  }
+  const recent = strikes.slice(-SHARED_LIMIT_STRIKES);
+  const modelId = recent[0].modelId;
+  if (recent.some((strike) => strike.modelId !== modelId)) {
+    return false;
+  }
+  const delays = recent.map((strike) => strike.retryAfterSeconds);
+  if (delays.every((delay) => delay === undefined)) {
+    return true;
+  }
+  if (delays.some((delay) => delay === undefined)) {
+    return false;
+  }
+  const known = delays as number[];
+  return Math.max(...known) - Math.min(...known) <= SHARED_LIMIT_SPREAD_SECONDS;
+}
+
+/** `[12 accounts: 2 cooling down, 9 without quota data, 1 needs sign-in]` */
+function describeAccounts(summary: AccountSummary): string {
+  const parts: string[] = [];
+  if (summary.coolingDown > 0) {
+    parts.push(`${summary.coolingDown} cooling down`);
+  }
+  if (summary.refused > 0) {
+    parts.push(`${summary.refused} refused by Google (verify the account)`);
+  }
+  if (summary.noCatalog > 0) {
+    parts.push(`${summary.noCatalog} without quota data`);
+  }
+  if (summary.needsReauth > 0) {
+    parts.push(`${summary.needsReauth} need${summary.needsReauth === 1 ? 's' : ''} sign-in`);
+  }
+  const noun = summary.total === 1 ? 'account' : 'accounts';
+  return parts.length > 0
+    ? `[${summary.total} ${noun}: ${parts.join(', ')}]`
+    : `[${summary.total} ${noun}]`;
 }

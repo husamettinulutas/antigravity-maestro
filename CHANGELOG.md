@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.0.10
+
+- **A moment's 503 from the sandbox host no longer costs five minutes of
+  failed requests.** The logs from an affected install told the story: the
+  sandbox host answered one request with 503, was sidelined for five minutes,
+  and every request in that window went to the production host — which
+  refuses this client outright with `RESOURCE_EXHAUSTED`, for every account,
+  with no retry delay. Each of those was read as the account running out, so
+  twelve accounts with quota to spare were put on cooldown in turn and the
+  user saw "Every account is unavailable" until the sandbox host was probed
+  again, at which point everything worked. Two things changed:
+
+  - A 502/503/504 is re-asked of the same host, after one and then two
+    seconds, before the request fails over. The overload clears within
+    seconds in practice, so most requests now never leave the sandbox host.
+
+  - A 429 from the production host while a preferred host is sidelined is
+    recorded as an outage rather than a rate limit: no account goes on
+    cooldown over it, the client is told to retry shortly, and the production
+    host is demoted too — with every host sidelined the configured order
+    applies again, so the next request probes the sandbox host first and is
+    served the moment it is back.
+
+  The 503's own message is now in the log line that demotes a host, so an
+  overloaded host can be told from an overloaded model.
+
+- **Accounts Google refused are counted apart from rate limits.** "Verify your
+  account to continue" is the account holder's to fix, and the breakdown now
+  lists those accounts as `refused by Google (verify the account)` instead of
+  folding them into "cooling down".
+
+- **A rate limit on the client no longer walks through every account.** The
+  Cloud Code endpoints also meter the caller as a whole — the production host
+  in particular answers `RESOURCE_EXHAUSTED` regardless of which account signs
+  the request. Every 429 was read as that account's, so the rotation spent a
+  doomed request on each signed-in account in turn, put all of them on
+  cooldown, and reported "Every account is unavailable" over a limit no
+  account had earned — twelve accounts, no successful request, and the same
+  wait counting down in every message. Three accounts refused in a row with
+  the same wait are now read as one shared window: the remaining accounts are
+  left untried, the model is held for the wait the upstream asked for, and the
+  message says the limit is the client's rather than an account's.
+
+- **An account whose quota was never read is no longer invisible to the
+  rotation.** A catalog is built from the account's own quota reading, and an
+  account without one had no catalog, so the rotation passed it over silently
+  — "every account" could mean the one or two that had been read. Until its
+  own reading lands, such an account is offered what the other accounts are
+  known to serve, with their quota figures stripped so nothing is mistaken for
+  a reading of it.
+
+- **Quota refreshes are paced.** Every account's quota was refreshed at once on
+  activation and every ten minutes — up to three round trips per account,
+  fired together — and the quota endpoints answered the burst with 429s that
+  left accounts without a reading. Refreshes now run three accounts at a time.
+
+- **The error says how many accounts were actually in the running.** The
+  message now ends with a breakdown such as `[12 accounts: 2 cooling down,
+  9 without quota data, 1 needs sign-in]`, so a rate limit on one account is
+  no longer indistinguishable from a rate limit on twelve.
+
+- **The log says which host is serving.** Traffic drifting onto the
+  production host after the sandbox hosts were demoted is the first thing to
+  look for when every account reads as rate limited, and the log never said
+  it had happened. It now reports each change of serving host, and warns when
+  the host is the one metered per client.
+
 ## 1.0.9
 
 - **A spent account is no longer the one every request starts on.** Candidate

@@ -14,7 +14,12 @@ const resolveFilename = (Module as any)._resolveFilename;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const http = require('../utils/http');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { CloudCodeClient, resetEndpointHealth } = require('../upstream/cloudCodeClient');
+const { CloudCodeClient, configureTransientRetries, resetEndpointHealth } = require('../upstream/cloudCodeClient');
+
+// A transient refusal is re-asked of the same host before failing over; the
+// existing tests count round trips per host, so the re-asks are switched off
+// here and turned on only by the tests that are about them.
+configureTransientRetries([]);
 
 // Order matters: production is deliberately last, because it refuses this
 // traffic outright while the other two serve it.
@@ -410,6 +415,75 @@ test('endpoints: serving a request restores the primary', async () => {
 
     assert.equal(transport.calls.length, 1);
     assert.ok(transport.calls[0].startsWith(PRIMARY), 'a recovered host is used first again');
+  } finally {
+    transport.restore();
+    resetEndpointHealth();
+  }
+});
+
+test('endpoints: a 503 is re-asked of the same host before failing over', async () => {
+  resetEndpointHealth();
+  configureTransientRetries([0, 0]);
+  let refusals = 0;
+  // The sandbox host's 503 is a moment's overload: it clears within seconds.
+  // Failing over on the first one handed the request to the production host,
+  // which refuses this client, and sidelined the sandbox host for minutes.
+  const transport = stubTransport((url) => {
+    if (url.startsWith(PRIMARY) && refusals < 2) {
+      refusals += 1;
+      return unavailable();
+    }
+    return ok();
+  });
+
+  try {
+    await new CloudCodeClient().generate(params());
+
+    assert.equal(transport.calls.length, 3);
+    assert.ok(
+      transport.calls.every((url: string) => url.startsWith(PRIMARY)),
+      `stayed on the primary host: ${transport.calls.join(', ')}`,
+    );
+  } finally {
+    transport.restore();
+    configureTransientRetries([]);
+    resetEndpointHealth();
+  }
+});
+
+test('endpoints: a production 429 behind sidelined hosts is an outage, not a rate limit', async () => {
+  resetEndpointHealth();
+  const exhausted = '{"error":{"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}';
+  let sandboxDown = true;
+  const transport = stubTransport((url) => {
+    if (url.startsWith(PRODUCTION)) {
+      return rateLimited(exhausted);
+    }
+    return sandboxDown ? unavailable() : ok();
+  });
+
+  try {
+    const client = new CloudCodeClient();
+    await assert.rejects(
+      () => client.generate(params()),
+      (error: { isRateLimit: boolean; status?: number; message: string }) => {
+        // Every account gets this answer in turn, so reading it as the
+        // account's limit put twelve accounts on cooldown over an outage.
+        assert.equal(error.isRateLimit, false);
+        assert.equal(error.status, 503);
+        assert.match(error.message, /refusing this client/);
+        return true;
+      },
+    );
+
+    // With every host sidelined the configured order applies again, so the
+    // next request probes the preferred host first — and is served the
+    // moment it is back — rather than paying another refused trip.
+    sandboxDown = false;
+    transport.calls.length = 0;
+    await client.generate(params());
+    assert.equal(transport.calls.length, 1);
+    assert.ok(transport.calls[0].startsWith(PRIMARY), `went to ${transport.calls[0]}`);
   } finally {
     transport.restore();
     resetEndpointHealth();

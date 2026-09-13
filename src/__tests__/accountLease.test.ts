@@ -265,3 +265,126 @@ test('lease: a successful request clears the account it ran on', async () => {
   await subject.run('claude-opus-4-6-thinking', async () => 'ok');
   assert.equal(subject.cooldownSeconds('a0', MODEL.id), 0);
 });
+
+test('lease: a run of identical rate limits stops the rotation, not just the account', async () => {
+  maxWait(0);
+  const subject = lease(['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com', 'e@example.com']);
+  const tried: string[] = [];
+
+  // The production host meters the client as a whole, so every account gets
+  // the same "Resource has been exhausted" with the same wait. Walking the
+  // whole list spent a doomed request per account and blamed twelve accounts
+  // for a limit none of them had earned.
+  await assert.rejects(
+    subject.run('claude-opus-4-6-thinking', async (context: { email: string }) => {
+      tried.push(context.email);
+      throw new UpstreamError('HTTP 429: Resource has been exhausted (e.g. check quota).', 429, '', 30);
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof NoAccountAvailableError);
+      const { message, retryAfterSeconds } = error as { message: string; retryAfterSeconds?: number };
+      assert.match(message, /this client, not one account, is rate limited/);
+      assert.match(message, /\[5 accounts: 5 cooling down\]/);
+      assert.ok(retryAfterSeconds! > 0 && retryAfterSeconds! <= 30);
+      return true;
+    },
+  );
+
+  assert.deepEqual(tried, ['a@example.com', 'b@example.com', 'c@example.com']);
+  // The untried accounts are held by the shared window too, so a retrying
+  // client cannot spend them either.
+  assert.ok(subject.cooldownSeconds('a4', MODEL.id) > 0);
+});
+
+test('lease: rate limits with different waits are still rotated past', async () => {
+  maxWait(0);
+  const subject = lease(['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
+  const waits: Record<string, number> = { 'a@example.com': 10, 'b@example.com': 40, 'c@example.com': 70 };
+  const tried: string[] = [];
+
+  // Three accounts that each ran out on their own report windows that end at
+  // different times. That is not the client's limit, and the fourth account
+  // must still get its turn.
+  const result = await subject.run('claude-opus-4-6-thinking', async (context: { email: string }) => {
+    tried.push(context.email);
+    const wait = waits[context.email];
+    if (wait !== undefined) {
+      throw new UpstreamError('HTTP 429: quota', 429, '', wait);
+    }
+    return 'served';
+  });
+
+  assert.equal(result, 'served');
+  assert.deepEqual(tried, ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
+});
+
+test('lease: a shared window is lifted the moment an account is served', async () => {
+  maxWait(0);
+  const subject = lease(['a@example.com']);
+  subject.markSharedCooldown(MODEL.id, 60, 'quota');
+  assert.ok(subject.cooldownSeconds('a0', MODEL.id) > 0);
+
+  subject.clearCooldowns();
+  await subject.run('claude-opus-4-6-thinking', async () => 'ok');
+  assert.equal(subject.cooldownSeconds('a0', MODEL.id), 0);
+});
+
+test('lease: the error says how many accounts were actually in the running', async () => {
+  maxWait(0);
+  const list = [
+    { id: 'a0', email: 'read@example.com' },
+    { id: 'a1', email: 'unread@example.com' },
+    { id: 'a2', email: 'unread2@example.com' },
+    { id: 'a3', email: 'expired@example.com', needsReauth: true },
+  ];
+  const accounts = {
+    list: () => list,
+    getActive: () => list[0],
+    get: (id: string) => list.find((account) => account.id === id),
+    getAccessToken: async () => 'token',
+    setActive: async () => undefined,
+  };
+  // Only the first account has a quota reading, so only it has a catalog.
+  const catalog = { resolve: (_model: string, accountId: string) => (accountId === 'a0' ? MODEL : undefined) };
+  const subject = new AccountLease(accounts as any, catalog as any, {
+    recordUsage: async () => undefined,
+  } as any);
+
+  await assert.rejects(
+    subject.run('claude-opus-4-6-thinking', async () => {
+      throw new UpstreamError('HTTP 429: quota', 429, '', 60);
+    }),
+    (error: unknown) => {
+      // "Every account is unavailable" was true of one account; the user saw
+      // twelve in the panel and had no way to tell the two apart.
+      assert.match(
+        (error as Error).message,
+        /\[4 accounts: 1 cooling down, 2 without quota data, 1 needs sign-in\]/,
+      );
+      return true;
+    },
+  );
+});
+
+test('lease: accounts Google refused are counted apart from rate limits', async () => {
+  maxWait(0);
+  const subject = lease(['ok@example.com', 'verify@example.com', 'verify2@example.com']);
+
+  await assert.rejects(
+    subject.run('claude-opus-4-6-thinking', async (context: { email: string }) => {
+      if (context.email.startsWith('verify')) {
+        throw new UpstreamError('HTTP 403: Verify your account to continue.', 403, '');
+      }
+      throw new UpstreamError('HTTP 429: quota', 429, '', 60);
+    }),
+    (error: unknown) => {
+      // "Verify your account" is the account holder's to fix; waiting out a
+      // window will not clear it, and the message should not suggest it.
+      assert.match(
+        (error as Error).message,
+        /\[3 accounts: 1 cooling down, 2 refused by Google \(verify the account\)\]/,
+      );
+      return true;
+    },
+  );
+});

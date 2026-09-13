@@ -24,6 +24,25 @@ const BASE_URLS = [
   'https://cloudcode-pa.googleapis.com/v1internal',
 ];
 
+/** The host that meters the client rather than the account. */
+const PRODUCTION_URL = BASE_URLS[BASE_URLS.length - 1];
+
+/**
+ * Waits before re-asking the same host after a transient refusal, in order.
+ *
+ * A 503 from the sandbox host is a moment's overload, not an outage: in the
+ * logs it clears within seconds and the next request is served. Failing over
+ * on the first one handed the request to the production host, which refuses
+ * this client outright, and the sandbox host was then sidelined for minutes
+ * over a blip — every request in that window was doomed before it started.
+ */
+let transientRetryDelaysMs: readonly number[] = [1000, 2000];
+
+/** Exposed for tests, which cannot afford the real waits. */
+export function configureTransientRetries(delaysMs: readonly number[]): void {
+  transientRetryDelaysMs = delaysMs;
+}
+
 /** Project ids the upstream uses as placeholders; never sent as a header. */
 const PLACEHOLDER_PROJECTS = new Set(['test-project', 'project-id']);
 
@@ -101,6 +120,7 @@ export function resetEndpointHealth(): void {
   gates.clear();
   rejectedProjects.clear();
   projectProbes.clear();
+  lastReportedHost = undefined;
 }
 
 /**
@@ -357,7 +377,7 @@ export class CloudCodeClient {
         const baseUrl = endpoints[index];
         const url = `${baseUrl}${path}`;
         try {
-          const response = await httpRequest(url, {
+          const response = await requestWithTransientRetry(url, {
             method: 'POST',
             headers: this.buildHeaders(params, projectHeaderDisabled),
             body: serialized,
@@ -368,10 +388,9 @@ export class CloudCodeClient {
           // Serving a request clears any doubt about this host.
           degradedEndpoints.delete(baseUrl);
           settleProjectVerdict();
+          reportServingHost(baseUrl);
           return response;
         } catch (error) {
-          lastError = error;
-
           // Only the project header is worth a second pass. A 403 that names
           // the account ("Verify your account to continue") comes back
           // identically without the header, so it is surfaced straight away
@@ -383,6 +402,7 @@ export class CloudCodeClient {
             params.projectId &&
             couldBeProjectRejection(error)
           ) {
+            lastError = error;
             Logger.warn('Upstream rejected the project header; retrying without it');
             pendingRejection = params.projectId;
             projectHeaderDisabled = true;
@@ -390,10 +410,37 @@ export class CloudCodeClient {
             break;
           }
 
+          // A 429 from the production host while a preferred host is sidelined
+          // is that host refusing the client, not the account running out —
+          // it says so for every account in turn, and with no retry delay. It
+          // is recorded as an outage so the caller does not put twelve
+          // accounts on cooldown over it, and the host is demoted like any
+          // other failure so the next request goes back to probing the
+          // preferred ones — which is where recovery actually comes from.
+          const refused = isClientRefusal(error, baseUrl);
+          const failure = refused
+            ? new UpstreamError(
+                "Antigravity's preferred hosts are unavailable and the production host is " +
+                  `refusing this client (HTTP ${(error as HttpError).status}); this is an outage, ` +
+                  'not an account limit — retry shortly',
+                503,
+                '',
+              )
+            : error;
+          lastError = failure;
+          if (refused && !degradedEndpoints.has(baseUrl)) {
+            // Demoted even when it is the last host in line: with every host
+            // sidelined the configured order applies again, so the next
+            // request probes the preferred host first instead of paying
+            // another refused round trip here.
+            Logger.warn(`Upstream ${url} refused this client (${describe(error)})`);
+            degradedEndpoints.set(baseUrl, Date.now());
+          }
+
           const hasNextEndpoint = index + 1 < endpoints.length;
-          if (!hasNextEndpoint || !shouldFailover(error)) {
+          if (!hasNextEndpoint || !shouldFailover(failure)) {
             settleProjectVerdict(error);
-            throw toUpstreamError(error);
+            throw toUpstreamError(failure);
           }
           // Only demote when a later endpoint can still be tried — a failure
           // with nowhere left to fail over says nothing about this host.
@@ -486,7 +533,94 @@ function orderForCaching(request: GeminiRequest, accountId: string | undefined):
   return ordered;
 }
 
+/**
+ * Say which host is serving, once per change rather than per request.
+ *
+ * The production host meters the whole client, so traffic silently drifting
+ * onto it after the sandbox hosts were demoted is the first thing to look for
+ * when every account reads as rate limited — and until now the log never said
+ * it had happened.
+ */
+let lastReportedHost: string | undefined;
+
+function reportServingHost(baseUrl: string): void {
+  if (baseUrl === lastReportedHost) {
+    return;
+  }
+  lastReportedHost = baseUrl;
+  const preferred = baseUrl === BASE_URLS[0];
+  const message = `Upstream requests are now served by ${baseUrl}`;
+  if (preferred) {
+    Logger.info(message);
+  } else {
+    Logger.warn(`${message} — the preferred host is degraded, and this one is metered per client`);
+  }
+}
+
+/**
+ * Ask one host, re-asking it after a transient refusal before giving up on it.
+ * Anything that is not transient — or arrives once the retries are spent — is
+ * thrown for the caller's failover logic.
+ */
+async function requestWithTransientRetry(
+  url: string,
+  options: Parameters<typeof httpRequest>[1],
+) {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await httpRequest(url, options);
+    } catch (error) {
+      const delayMs = transientRetryDelaysMs[retry];
+      if (delayMs === undefined || !isTransient(error) || options?.signal?.aborted) {
+        throw error;
+      }
+      Logger.warn(
+        `Upstream ${url} answered ${describe(error)}; asking the same host again in ${delayMs}ms`,
+      );
+      await sleep(delayMs, options?.signal);
+    }
+  }
+}
+
+/** A refusal the same host is likely to withdraw within seconds. */
+function isTransient(error: unknown): boolean {
+  return (
+    error instanceof HttpError &&
+    (error.status === 502 || error.status === 503 || error.status === 504)
+  );
+}
+
+/**
+ * True when the production host rate limited a request while a preferred host
+ * is sidelined — its way of refusing the client as a whole, which no account
+ * can do anything about.
+ */
+function isClientRefusal(error: unknown, baseUrl: string): boolean {
+  return (
+    error instanceof HttpError &&
+    error.status === 429 &&
+    baseUrl === PRODUCTION_URL &&
+    BASE_URLS.some((url) => url !== PRODUCTION_URL && degradedEndpoints.has(url))
+  );
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    }
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
 function shouldFailover(error: unknown): boolean {
+  if (error instanceof UpstreamError) {
+    // Already classified — a production refusal arrives here as a 503.
+    return (error.status ?? 0) >= 500;
+  }
   if (error instanceof HttpError) {
     // Deliberately not 429: both hosts meter the same account, so failing over
     // is a guaranteed second rate limit that doubles the pressure exactly when
@@ -565,10 +699,10 @@ function parseDuration(value: unknown): number | undefined {
 }
 
 function describe(error: unknown): string {
-  if (error instanceof HttpError) {
-    return `HTTP ${error.status}`;
-  }
-  return error instanceof Error ? error.message : String(error);
+  // The message carries what the body said, and for a 503 that is the only
+  // clue to whether the host is overloaded or the model is.
+  const text = error instanceof Error ? error.message : String(error);
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 function parseJson(text: string): any {

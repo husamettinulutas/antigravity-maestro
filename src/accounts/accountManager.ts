@@ -8,9 +8,13 @@ import { AccountStore } from './accountStore';
 import { fetchQuota, QuotaForbiddenError, QuotaUnauthorizedError } from './quotaService';
 import { QuotaHistory } from './quotaHistory';
 import { AccessToken, AccountMetadata } from './types';
+import { mapWithConcurrency } from '../utils/concurrency';
 
 /** Refresh an access token this long before it actually expires. */
 const EXPIRY_SKEW_MS = 60_000;
+
+/** Accounts whose quota is being read at once during a full refresh. */
+const QUOTA_REFRESH_CONCURRENCY = 3;
 
 export class AccountManager implements vscode.Disposable {
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
@@ -253,9 +257,19 @@ export class AccountManager implements vscode.Disposable {
     }
   }
 
-  /** Refresh every account's quota, in parallel but tolerating failures. */
+  /**
+   * Refresh every account's quota, a few at a time and tolerating failures.
+   *
+   * Every refresh is up to three round trips per account, and firing them all
+   * at once — twelve accounts on activation, again every ten minutes — was a
+   * burst the quota endpoints answered with 429s. An account whose reading was
+   * refused that way had no model catalog, and no catalog meant the rotation
+   * never considered it. Pacing the refresh keeps the readings landing.
+   */
   async refreshAllQuotas(): Promise<void> {
-    await Promise.all(this.list().map((account) => this.refreshQuota(account.id)));
+    await mapWithConcurrency(this.list(), QUOTA_REFRESH_CONCURRENCY, (account) =>
+      this.refreshQuota(account.id),
+    );
   }
 
   /** Start the background quota refresh loop (no-op when disabled). */
