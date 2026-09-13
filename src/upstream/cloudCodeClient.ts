@@ -38,9 +38,36 @@ const PRODUCTION_URL = BASE_URLS[BASE_URLS.length - 1];
  */
 let transientRetryDelaysMs: readonly number[] = [1000, 2000];
 
+/**
+ * Waits for a 503 that names the model — `No capacity available for model
+ * … on the server`. That is the model's pool being full rather than the host
+ * being unwell, and it comes and goes in bursts: a request refused now is
+ * usually served a few seconds later. It gets a longer run of re-asks than a
+ * generic 5xx, because failing over does nothing for it — every host draws
+ * on the same pool — and Copilot Chat does not retry on its own, so the
+ * user's only other option was a "Try again" button.
+ */
+let capacityRetryDelaysMs: readonly number[] = [1000, 2000, 4000, 8000];
+
+/**
+ * Most a single request spends re-asking, across every host it tries. Without
+ * a cap, a capacity refusal on each of the three hosts in turn would hold the
+ * user for the full schedule three times over.
+ */
+const RETRY_BUDGET_MS = 15_000;
+
 /** Exposed for tests, which cannot afford the real waits. */
-export function configureTransientRetries(delaysMs: readonly number[]): void {
+export function configureTransientRetries(
+  delaysMs: readonly number[],
+  capacityDelaysMs: readonly number[] = delaysMs,
+): void {
   transientRetryDelaysMs = delaysMs;
+  capacityRetryDelaysMs = capacityDelaysMs;
+}
+
+/** What is left of one request's retry budget, shared across its hosts. */
+interface RetryBudget {
+  remainingMs: number;
 }
 
 /** Project ids the upstream uses as placeholders; never sent as a header. */
@@ -344,6 +371,7 @@ export class CloudCodeClient {
     /** Set once the header has been dropped; confirmed by what came back. */
     let pendingRejection: string | undefined;
     let lastError: unknown;
+    const budget: RetryBudget = { remainingMs: RETRY_BUDGET_MS };
 
     /**
      * Remember that the project header was the problem — but only when the
@@ -377,14 +405,18 @@ export class CloudCodeClient {
         const baseUrl = endpoints[index];
         const url = `${baseUrl}${path}`;
         try {
-          const response = await requestWithTransientRetry(url, {
-            method: 'POST',
-            headers: this.buildHeaders(params, projectHeaderDisabled),
-            body: serialized,
-            timeoutMs: Config.requestTimeoutMs(),
-            proxyUrl: Config.upstreamProxyUrl(),
-            signal: params.signal,
-          });
+          const response = await requestWithTransientRetry(
+            url,
+            {
+              method: 'POST',
+              headers: this.buildHeaders(params, projectHeaderDisabled),
+              body: serialized,
+              timeoutMs: Config.requestTimeoutMs(),
+              proxyUrl: Config.upstreamProxyUrl(),
+              signal: params.signal,
+            },
+            budget,
+          );
           // Serving a request clears any doubt about this host.
           degradedEndpoints.delete(baseUrl);
           settleProjectVerdict();
@@ -565,15 +597,21 @@ function reportServingHost(baseUrl: string): void {
 async function requestWithTransientRetry(
   url: string,
   options: Parameters<typeof httpRequest>[1],
+  budget: RetryBudget,
 ) {
   for (let retry = 0; ; retry++) {
     try {
       return await httpRequest(url, options);
     } catch (error) {
-      const delayMs = transientRetryDelaysMs[retry];
-      if (delayMs === undefined || !isTransient(error) || options?.signal?.aborted) {
+      if (!isTransient(error) || options?.signal?.aborted) {
         throw error;
       }
+      const schedule = isCapacityRefusal(error) ? capacityRetryDelaysMs : transientRetryDelaysMs;
+      const delayMs = schedule[retry];
+      if (delayMs === undefined || delayMs > budget.remainingMs) {
+        throw error;
+      }
+      budget.remainingMs -= delayMs;
       Logger.warn(
         `Upstream ${url} answered ${describe(error)}; asking the same host again in ${delayMs}ms`,
       );
@@ -587,6 +625,15 @@ function isTransient(error: unknown): boolean {
   return (
     error instanceof HttpError &&
     (error.status === 502 || error.status === 503 || error.status === 504)
+  );
+}
+
+/** A 503 about the model's pool being full, not about the host. */
+function isCapacityRefusal(error: unknown): boolean {
+  return (
+    error instanceof HttpError &&
+    error.status === 503 &&
+    /no capacity|capacity available|overloaded/i.test(`${error.message} ${error.body}`)
   );
 }
 

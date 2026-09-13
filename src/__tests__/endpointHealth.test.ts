@@ -489,3 +489,62 @@ test('endpoints: a production 429 behind sidelined hosts is an outage, not a rat
     resetEndpointHealth();
   }
 });
+
+test('endpoints: a "no capacity" 503 is re-asked longer than a generic one', async () => {
+  resetEndpointHealth();
+  // Generic 5xx: no re-asks at all here. Capacity: four of them.
+  configureTransientRetries([], [0, 0, 0, 0]);
+  const noCapacity = () =>
+    new http.HttpError(
+      'HTTP 503: No capacity available for model claude-opus-4-6-thinking on the server',
+      503,
+      '{"error":{"message":"No capacity available for model claude-opus-4-6-thinking on the server"}}',
+      {},
+    );
+  let refusals = 0;
+  const transport = stubTransport((url) => {
+    if (url.startsWith(PRIMARY) && refusals < 4) {
+      refusals += 1;
+      return noCapacity();
+    }
+    return ok();
+  });
+
+  try {
+    // The model's pool being full comes and goes in bursts, and failing over
+    // does nothing for it — every host draws on the same pool — so the same
+    // host is asked again until the burst passes.
+    await new CloudCodeClient().generate(params({ model: 'claude-opus-4-6-thinking' }));
+
+    assert.equal(transport.calls.length, 5);
+    assert.ok(transport.calls.every((url: string) => url.startsWith(PRIMARY)));
+  } finally {
+    transport.restore();
+    configureTransientRetries([]);
+    resetEndpointHealth();
+  }
+});
+
+test('endpoints: a generic 503 keeps the short schedule', async () => {
+  resetEndpointHealth();
+  configureTransientRetries([0], [0, 0, 0, 0]);
+  let refusals = 0;
+  const transport = stubTransport((url) => {
+    if (url.startsWith(PRIMARY)) {
+      refusals += 1;
+      return unavailable();
+    }
+    return ok();
+  });
+
+  try {
+    await new CloudCodeClient().generate(params());
+    // One re-ask on the primary, then the failover served it.
+    assert.equal(refusals, 2);
+    assert.ok(transport.calls[transport.calls.length - 1].startsWith(FALLBACK));
+  } finally {
+    transport.restore();
+    configureTransientRetries([]);
+    resetEndpointHealth();
+  }
+});

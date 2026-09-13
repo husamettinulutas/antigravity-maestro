@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.10
+## 1.0.11
 
 - **A moment's 503 from the sandbox host no longer costs five minutes of
   failed requests.** The logs from an affected install told the story: the
@@ -25,6 +25,15 @@
 
   The 503's own message is now in the log line that demotes a host, so an
   overloaded host can be told from an overloaded model.
+
+- **A model with no capacity is asked again for longer.** `No capacity
+  available for model claude-opus-4-6-thinking on the server` is the model's
+  pool being full, not the host being unwell, and it comes and goes in
+  bursts. Failing over does nothing for it — every host draws on the same
+  pool — and Copilot Chat does not retry on its own, so the user was left
+  with a "Try again" button. A capacity refusal is now re-asked of the same
+  host after one, two, four and eight seconds, within a fifteen-second budget
+  per request; a generic 5xx keeps the short one-and-two-second schedule.
 
 - **Accounts Google refused are counted apart from rate limits.** "Verify your
   account to continue" is the account holder's to fix, and the breakdown now
