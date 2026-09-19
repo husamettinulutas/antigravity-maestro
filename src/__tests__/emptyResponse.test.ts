@@ -21,7 +21,7 @@ const {
   resetEndpointHealth,
 } = require('../upstream/cloudCodeClient');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { EmptyResponseWatch } = require('../upstream/emptyResponse');
+const { EmptyResponseWatch, overlongPrompt, overlongResponse } = require('../upstream/emptyResponse');
 
 configureTransientRetries([]);
 
@@ -173,4 +173,34 @@ test('empty response: a stream cut short by the token cap is not re-asked', () =
   const failure = watch.failure();
   assert.ok(failure);
   assert.equal(failure.retryable, false);
+});
+
+// ── An overlong prompt ────────────────────────────────────────────────────────
+
+const OPUS = { id: 'claude-opus-4-6-thinking', maxInputTokens: 200_000 };
+
+test('overlong prompt: a conversation within the limit is sent', () => {
+  // ~200k tokens of characters — right at the limit, where the character
+  // estimate is not accurate enough to refuse.
+  assert.equal(overlongPrompt(740_000, OPUS), undefined);
+});
+
+test('overlong prompt: only an impossible one is refused unsent', () => {
+  // Nothing the estimate could get wrong explains 400k tokens against a 200k
+  // limit, so this one never leaves.
+  const refusal = overlongPrompt(1_480_000, OPUS);
+  assert.match(refusal ?? '', /past what claude-opus-4-6-thinking accepts \(200k\)/);
+  assert.match(refusal ?? '', /was not sent/);
+});
+
+test('overlong prompt: the upstream token count settles the near miss', () => {
+  // The case the logs show: 208k prompt tokens against a 200k limit. The
+  // upstream bills it and answers with nothing, and only its own count — not
+  // the character estimate — can tell this from a conversation that fits.
+  const message = overlongResponse({ promptTokenCount: 208_000 }, OPUS);
+  assert.match(message ?? '', /208k tokens, past what claude-opus-4-6-thinking accepts/);
+  assert.match(message ?? '', /billed and answered with nothing/);
+
+  assert.equal(overlongResponse({ promptTokenCount: 199_000 }, OPUS), undefined);
+  assert.equal(overlongResponse(undefined, OPUS), undefined);
 });

@@ -11,7 +11,11 @@ import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/r
 import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
 import { CloudCodeClient, UpstreamError } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
-import { EmptyResponseError, EmptyResponseWatch } from '../upstream/emptyResponse';
+import {
+  EmptyResponseError,
+  EmptyResponseWatch,
+  overlongResponse,
+} from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { Logger } from '../utils/logger';
 
@@ -225,7 +229,11 @@ export class GatewayServer {
    * is honoured where the model allows it, then clamped to the model's limits.
    */
   private prepareAnthropicRequest(body: AnthropicRequest, context: LeaseContext): GeminiRequest {
-    const { request, requestedThinkingBudget } = toGeminiRequest(body);
+    const { request, requestedThinkingBudget } = toGeminiRequest(
+      body,
+      context.model.id,
+      context.model.supportsThinking,
+    );
 
     request.generationConfig = request.generationConfig ?? {};
     if (context.model.supportsThinking) {
@@ -273,7 +281,7 @@ export class GatewayServer {
 
     try {
       await this.deps.lease.run(body.model, async (context) => {
-        const request = this.tuneRequest(responsesToGemini(body), context);
+        const request = this.tuneRequest(responsesToGemini(body, context.model.id, context.model.supportsThinking), context);
         Logger.info(
           `Responses request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
         );
@@ -326,7 +334,7 @@ export class GatewayServer {
 
     try {
       await this.deps.lease.run(body.model, async (context) => {
-        const request = this.tuneRequest(chatToGemini(body), context);
+        const request = this.tuneRequest(chatToGemini(body, context.model.id, context.model.supportsThinking), context);
         Logger.info(
           `Chat request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
         );
@@ -391,6 +399,11 @@ export class GatewayServer {
     watch.note(response);
     const empty = watch.failure();
     if (empty) {
+      const tooLong = overlongResponse(response.usageMetadata, context.model);
+      if (tooLong) {
+        Logger.warn(`Overlong prompt on ${context.model.id}: ${tooLong}`);
+        throw new EmptyResponseError(tooLong, false);
+      }
       Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
       throw empty;
     }
@@ -493,10 +506,19 @@ export class GatewayServer {
       if (empty) {
         // Report it before the usage is recorded and the response committed,
         // so a retry or another account can still serve this turn.
-        Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
-        await this.deps.lease.recordUsage(context, mapper.usage());
+        const usage = mapper.usage();
+        // An overlong prompt is the one silence with a known cause: the
+        // upstream bills the request and answers with nothing, so asking again
+        // — here or on another account — only pays for the same silence.
+        const tooLong = overlongResponse(usage, context.model);
+        Logger.warn(
+          tooLong
+            ? `Overlong prompt on ${context.model.id}: ${tooLong}`
+            : `Empty response from ${context.email} on ${context.model.id}: ${empty.message}`,
+        );
+        await this.deps.lease.recordUsage(context, usage);
         usageRecorded = true;
-        throw empty;
+        throw tooLong ? new EmptyResponseError(tooLong, false) : empty;
       }
 
       write(mapper.finish());

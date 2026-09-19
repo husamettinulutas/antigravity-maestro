@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.0.14
+
+- **A tool call made by one model no longer breaks the next one.** Switching
+  model partway through a conversation — picking Claude in the middle of a
+  Gemini session, or going back — failed the turn outright, and failed it
+  differently depending on which way the switch went. Gemini answered
+  `HTTP 400: Function call is missing a thought_signature`; Claude accepted
+  the request, billed it, and closed the stream with nothing in it. Both were
+  the same mistake.
+
+  The upstream issues a thought signature with every reasoning block and tool
+  call, and demands it back when the call is replayed. Those signatures were
+  kept under the call id alone, with no record of which model minted them, so
+  a turn made by Claude was replayed to Gemini carrying a signature Gemini had
+  never issued — and once the lookup missed, the call went up bare, which is
+  what the upstream refuses. A signature now carries the model family that
+  issued it and is offered back only to that family.
+
+- **A tool call with no usable signature is retold, not dropped and not sent
+  bare.** Reloading the extension empties the signature store; an hour's
+  pause ages it out; a client replaying a session from disk never had one.
+  Any of those turned the next message into a rejected request with no way
+  forward. Such a call is now written into the history as text — the call and
+  its result together, because a result whose call is missing is refused just
+  as hard — so the conversation stays readable and the turn goes through.
+  Only the thinking Gemini models need this; the ones that do not think never
+  issue a signature and never ask for one, and their tool calls are untouched.
+
+- **A conversation past the model's context limit no longer burns tokens on
+  silence.** The upstream does not reject an overlong prompt. It accepts it,
+  charges for it in full, and closes the stream with `finishReason: STOP` and
+  no content — which read as an empty answer, so the turn was asked again,
+  and the client asked again after that. One affected session spent eight
+  full-price Opus requests, every one of them silent, before every account
+  went into cooldown.
+
+  When the upstream's own prompt token count exceeds what the model accepts,
+  the silence is explained rather than retried: the failure now names the
+  size, the limit and the model, and says to start a new chat or pick a model
+  with more room. A request so far past the limit that no estimate could
+  excuse it is refused before it is sent at all — loosely, because a
+  characters-per-token ratio is not a tokenizer and a prompt that merely fits
+  tightly deserves to be tried.
+
 ## 1.0.13
 
 - **An empty answer is no longer silent.** A request could end with nothing

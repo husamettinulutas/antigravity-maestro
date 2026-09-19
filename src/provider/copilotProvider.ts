@@ -12,10 +12,15 @@ import {
   pruneUndefined,
 } from '../protocol/gemini';
 import { sanitizeToolSchema } from '../protocol/schema';
-import { signatureStore } from '../protocol/signatureStore';
+import { signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
-import { EmptyResponseError, EmptyResponseWatch } from '../upstream/emptyResponse';
+import {
+  EmptyResponseError,
+  EmptyResponseWatch,
+  overlongPrompt,
+  overlongResponse,
+} from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { prefixedId } from '../utils/ids';
 import { Logger } from '../utils/logger';
@@ -119,6 +124,11 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
             `prompt~${size.prompt} (tools ${size.tools}, attachments ${size.attachments})`,
         );
 
+        const overflow = overlongPrompt(size.characters, context.model);
+        if (overflow) {
+          throw new Error(overflow);
+        }
+
         await this.runTurn(request, context, progress, token, abort.signal);
       }, abort.signal);
     } catch (error) {
@@ -219,7 +229,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         watch.note(chunk);
 
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-          if (this.reportPart(part, progress)) {
+          if (this.reportPart(part, progress, context.model.id)) {
             emitted = true;
             // Thoughts count as output here even though they carry no answer:
             // once they have been shown, re-asking would show them twice.
@@ -238,6 +248,13 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       // was returned" — with nothing in the log to say why.
       const empty = watch.failure();
       if (empty && !token.isCancellationRequested) {
+        // An overlong prompt is the one silence with a known cause, and asking
+        // again would buy the same silence at the same price.
+        const tooLong = overlongResponse(usage, context.model);
+        if (tooLong) {
+          Logger.warn(`Overlong prompt on ${context.model.id}: ${tooLong}`);
+          throw new EmptyResponseError(tooLong, false);
+        }
         Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
         throw empty;
       }
@@ -261,13 +278,14 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
   private reportPart(
     part: GeminiPart,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+    model: string,
   ): boolean {
     if (part.functionCall?.name) {
       // The upstream's own id is kept when it sends one: the Claude models are
       // served by translating this into the Anthropic format, and the id has to
       // match the `tool_use` block the next turn refers back to.
       const callId = part.functionCall.id || prefixedId('call');
-      signatureStore.rememberToolCall(callId, part.thoughtSignature);
+      signatureStore.rememberToolCall(callId, part.thoughtSignature, model);
       progress.report(
         new vscode.LanguageModelToolCallPart(callId, part.functionCall.name, part.functionCall.args ?? {}),
       );
@@ -308,7 +326,11 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     context: LeaseContext,
     model: vscode.LanguageModelChatInformation,
   ): GeminiRequest {
-    const { systemText, contents } = convertMessages(messages);
+    const { systemText, contents } = convertMessages(
+      messages,
+      context.model.id,
+      context.model.supportsThinking,
+    );
     const tools = buildTools(options);
 
     const request: GeminiRequest = {
@@ -348,14 +370,30 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
  * tool calls and results; Gemini expects alternating user/model contents with
  * functionCall / functionResponse parts, and needs the tool *name* on results,
  * which VS Code only supplies on the original call.
+ *
+ * `model` is the model the contents are being built for: it decides which
+ * stored thought signatures may be replayed, and which calls have to be
+ * retold as text because no signature for them survives.
  */
-export function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): {
+export function convertMessages(
+  messages: readonly vscode.LanguageModelChatRequestMessage[],
+  model = 'gemini',
+  requiresSignature = false,
+): {
   systemText: string;
   contents: GeminiContent[];
 } {
   const toolNamesByCallId = collectToolNames(messages);
+  const unsigned = unsignedCallIds(messages, model, requiresSignature);
   const contents: GeminiContent[] = [];
   const systemChunks: string[] = [];
+
+  if (unsigned.size > 0) {
+    Logger.debug(
+      `Retelling ${unsigned.size} unsigned tool call(s) as text for ${model}`,
+      [...unsigned],
+    );
+  }
 
   for (const message of messages) {
     const role = roleOf(message);
@@ -366,7 +404,7 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 
     const parts: GeminiPart[] = [];
     for (const part of asArray(message.content)) {
-      const converted = convertPart(part, toolNamesByCallId);
+      const converted = convertPart(part, toolNamesByCallId, model, unsigned);
       if (converted) {
         parts.push(converted);
       }
@@ -395,24 +433,34 @@ export function convertMessages(messages: readonly vscode.LanguageModelChatReque
 function convertPart(
   part: unknown,
   toolNames: Map<string, string>,
+  model: string,
+  unsigned: ReadonlySet<string>,
 ): GeminiPart | undefined {
   if (isToolCallPart(part)) {
-    const signature = signatureStore.forToolCall(part.callId);
+    const args = typeof part.input === 'object' && part.input ? (part.input as any) : {};
+    if (unsigned.has(part.callId)) {
+      return { text: `[tool call] ${part.name}(${JSON.stringify(args)})` };
+    }
     return {
       functionCall: {
         // Required: for the Claude models the upstream turns this back into an
         // Anthropic `tool_use` block, which rejects the request without an id.
         id: part.callId,
         name: part.name,
-        args: typeof part.input === 'object' && part.input ? (part.input as any) : {},
+        args,
       },
-      thoughtSignature: signature,
+      thoughtSignature: signatureStore.forToolCall(part.callId, model),
     };
   }
 
   if (isToolResultPart(part)) {
     const name = toolNames.get(part.callId) ?? 'tool';
     const output = extractText(part.content) || '(no output)';
+    // The call it answers was retold as text, and a functionResponse with no
+    // functionCall before it is rejected just as hard as the bare call was.
+    if (unsigned.has(part.callId)) {
+      return { text: `[tool result] ${name}: ${output}` };
+    }
     return { functionResponse: { id: part.callId, name, response: { output } } };
   }
 
@@ -427,6 +475,45 @@ function convertPart(
 
   const text = textOfPart(part);
   return text === '' ? undefined : { text };
+}
+
+/**
+ * The tool calls that cannot be replayed to `model` as tool calls.
+ *
+ * Gemini 3 rejects the whole request — HTTP 400, "Function call is missing a
+ * thought_signature" — when a replayed `functionCall` carries no signature it
+ * issued. That happens for reasons the conversation cannot undo: the turn was
+ * made by a different model family before the user switched, the extension was
+ * reloaded and the in-memory store went with it, or the signature aged out.
+ *
+ * Dropping those calls would orphan their results and lose what the assistant
+ * did; sending them bare fails the turn. So they are retold as text, which
+ * keeps the history readable and the request valid. The set is computed in one
+ * pass up front because a call and its result are converted separately and the
+ * two decisions have to agree.
+ *
+ * Only Gemini needs this. The Claude and GPT models are served by translating
+ * the request back out of the Gemini shape, and an unsigned tool call survives
+ * that translation.
+ */
+function unsignedCallIds(
+  messages: readonly vscode.LanguageModelChatRequestMessage[],
+  model: string,
+  requiresSignature: boolean,
+): ReadonlySet<string> {
+  const unsigned = new Set<string>();
+  if (!requiresSignature || signatureFamilyOf(model) !== 'gemini') {
+    return unsigned;
+  }
+
+  for (const message of messages) {
+    for (const part of asArray(message.content)) {
+      if (isToolCallPart(part) && !signatureStore.forToolCall(part.callId, model)) {
+        unsigned.add(part.callId);
+      }
+    }
+  }
+  return unsigned;
 }
 
 /** callId → tool name, taken from the assistant turns that made the calls. */
@@ -517,6 +604,8 @@ function measureRequest(request: GeminiRequest): {
   prompt: string;
   tools: string;
   attachments: string;
+  /** The prompt in characters, for the limit check the log line cannot do. */
+  characters: number;
 } {
   const tools = request.tools ? JSON.stringify(request.tools).length : 0;
   const system = request.systemInstruction ? JSON.stringify(request.systemInstruction).length : 0;
@@ -538,12 +627,14 @@ function measureRequest(request: GeminiRequest): {
     prompt: kilobytes(system + contents + tools),
     tools: kilobytes(tools),
     attachments: kilobytes(attachments),
+    characters: system + contents + tools,
   };
 }
 
 function kilobytes(characters: number): string {
   return `${Math.round(characters / 1024)}KB`;
 }
+
 
 /** The tool index in a rejection like `tools.4.custom.input_schema: …`. */
 export function rejectedToolIndex(message: string): number | undefined {

@@ -1,4 +1,7 @@
-import { GeminiResponse } from '../protocol/gemini';
+import { GeminiResponse, UsageMetadata } from '../protocol/gemini';
+
+/** Rough characters-per-token ratio, the same one the token count estimate uses. */
+const CHARS_PER_TOKEN = 3.7;
 
 /**
  * A stream that ended without producing a single word, tool call or thought.
@@ -118,4 +121,76 @@ export function hasContent(chunk: GeminiResponse): boolean {
     }
   }
   return false;
+}
+
+/**
+ * How far past its input limit a request has to measure before it is refused
+ * unsent.
+ *
+ * `CHARS_PER_TOKEN` is a rough ratio, not a tokenizer, so this is deliberately
+ * loose: it only stops a request that no estimation error could explain away.
+ * A prompt a few percent over the limit is sent, and `overlongResponse` catches
+ * it afterwards using the count the upstream itself reports — exact, where this
+ * is a guess.
+ */
+const INPUT_LIMIT_MARGIN = 1.5;
+
+/**
+ * The reason to refuse a request outright, or `undefined` when it is worth
+ * sending.
+ *
+ * A prompt past the model's input limit is not rejected upstream. The request
+ * is accepted, billed in full, and the stream closes with `finishReason: STOP`
+ * and nothing in it — so the client sees an empty answer, retries, and pays
+ * again for the same silence.
+ */
+export function overlongPrompt(
+  characters: number,
+  model: { id: string; maxInputTokens: number },
+): string | undefined {
+  if (!(model.maxInputTokens > 0)) {
+    return undefined;
+  }
+
+  const estimate = Math.ceil(characters / CHARS_PER_TOKEN);
+  return estimate > model.maxInputTokens * INPUT_LIMIT_MARGIN
+    ? tooLongMessage(estimate, model, 'was not sent')
+    : undefined;
+}
+
+/**
+ * The same failure, recognised after the fact from what the upstream counted.
+ *
+ * This is the one that catches the ordinary case: a conversation that has crept
+ * a few percent past the limit, which the character estimate cannot tell from
+ * one comfortably inside it. `promptTokenCount` is the upstream's own figure,
+ * so when it exceeds the model's limit the silence is explained — and asking
+ * again would only buy the same silence at the same price, which is why the
+ * failure it produces is not retryable.
+ */
+export function overlongResponse(
+  usage: UsageMetadata | undefined,
+  model: { id: string; maxInputTokens: number },
+): string | undefined {
+  const counted = usage?.promptTokenCount;
+  if (!counted || !(model.maxInputTokens > 0) || counted <= model.maxInputTokens) {
+    return undefined;
+  }
+  return tooLongMessage(counted, model, 'was billed and answered with nothing');
+}
+
+function tooLongMessage(
+  tokens: number,
+  model: { id: string; maxInputTokens: number },
+  outcome: string,
+): string {
+  return (
+    `This conversation is ${thousands(tokens)} tokens, past what ${model.id} accepts ` +
+    `(${thousands(model.maxInputTokens)}), so it ${outcome}. Start a new chat, or pick ` +
+    'a model with a larger context.'
+  );
+}
+
+function thousands(tokens: number): string {
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}k` : String(tokens);
 }
