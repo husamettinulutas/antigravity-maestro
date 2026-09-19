@@ -11,6 +11,7 @@ import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/r
 import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
 import { CloudCodeClient, UpstreamError } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
+import { EmptyResponseError, EmptyResponseWatch } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { Logger } from '../utils/logger';
 
@@ -188,13 +189,15 @@ export class GatewayServer {
         );
 
         if (body.stream) {
-          const mapper = new AnthropicStreamMapper(context.model.id);
-          await this.pipeStream(res, request, context, abort.signal, {
-            start: () => mapper.start(),
-            push: (chunk) => mapper.push(chunk),
-            finish: () => mapper.finish(),
-            error: (message) => mapper.error(message),
-            usage: () => mapper.usageMetadata(),
+          await this.pipeStream(res, request, context, abort.signal, () => {
+            const mapper = new AnthropicStreamMapper(context.model.id);
+            return {
+              start: () => mapper.start(),
+              push: (chunk) => mapper.push(chunk),
+              finish: () => mapper.finish(),
+              error: (message) => mapper.error(message),
+              usage: () => mapper.usageMetadata(),
+            };
           });
           return;
         }
@@ -209,6 +212,7 @@ export class GatewayServer {
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
+        this.rejectEmpty(response, context);
         sendJson(res, 200, toAnthropicResponse(response, context.model.id));
       }, abort.signal);
     } catch (error) {
@@ -275,13 +279,15 @@ export class GatewayServer {
         );
 
         if (body.stream) {
-          const mapper = new ResponsesStreamMapper(context.model.id);
-          await this.pipeStream(res, request, context, abort.signal, {
-            start: () => mapper.start(),
-            push: (chunk) => mapper.push(chunk),
-            finish: () => mapper.finish(),
-            error: (message) => mapper.error(message),
-            usage: () => mapper.usageMetadata(),
+          await this.pipeStream(res, request, context, abort.signal, () => {
+            const mapper = new ResponsesStreamMapper(context.model.id);
+            return {
+              start: () => mapper.start(),
+              push: (chunk) => mapper.push(chunk),
+              finish: () => mapper.finish(),
+              error: (message) => mapper.error(message),
+              usage: () => mapper.usageMetadata(),
+            };
           });
           return;
         }
@@ -296,6 +302,7 @@ export class GatewayServer {
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
+        this.rejectEmpty(response, context);
         sendJson(res, 200, toResponsesResponse(response, context.model.id));
       }, abort.signal);
     } catch (error) {
@@ -325,12 +332,14 @@ export class GatewayServer {
         );
 
         if (body.stream) {
-          const mapper = new ChatStreamMapper(context.model.id);
-          await this.pipeStream(res, request, context, abort.signal, {
-            push: (chunk) => mapper.push(chunk),
-            finish: () => mapper.finish(includeUsage),
-            error: (message) => mapper.error(message),
-            usage: () => mapper.usageMetadata(),
+          await this.pipeStream(res, request, context, abort.signal, () => {
+            const mapper = new ChatStreamMapper(context.model.id);
+            return {
+              push: (chunk) => mapper.push(chunk),
+              finish: () => mapper.finish(includeUsage),
+              error: (message) => mapper.error(message),
+              usage: () => mapper.usageMetadata(),
+            };
           });
           return;
         }
@@ -345,6 +354,7 @@ export class GatewayServer {
           signal: abort.signal,
         });
         await this.deps.lease.recordUsage(context, response.usageMetadata);
+        this.rejectEmpty(response, context);
         sendJson(res, 200, toChatCompletion(response, context.model.id));
       }, abort.signal);
     } catch (error) {
@@ -371,14 +381,69 @@ export class GatewayServer {
     return request;
   }
 
+  /**
+   * Fail a non-streaming answer that came back without content, rather than
+   * handing the client an assistant turn with nothing in it. The usage is
+   * already recorded — the tokens were spent either way.
+   */
+  private rejectEmpty(response: GeminiResponse, context: LeaseContext): void {
+    const watch = new EmptyResponseWatch();
+    watch.note(response);
+    const empty = watch.failure();
+    if (empty) {
+      Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
+      throw empty;
+    }
+  }
+
   // ── Streaming ──────────────────────────────────────────────────────────────
 
   /**
-   * Shared SSE pump. Response headers are written only after the upstream has
-   * accepted the request, so a rate limit can still be retried on another
-   * account before anything reaches the client.
+   * Shared SSE pump.
+   *
+   * Nothing is written to the client until the upstream produces content. The
+   * headers used to go out as soon as the upstream accepted the request, which
+   * meant a failure arriving *inside* the stream — a rate limit reported after
+   * the 200, or a stream that closed without a word in it — could only be
+   * turned into an SSE `error` event on a response that had already committed
+   * to succeeding. Holding them back keeps that failure an ordinary one: it
+   * propagates out of here, the lease tries the next account, and only a
+   * refusal every account shares reaches the client.
    */
   private async pipeStream(
+    res: http.ServerResponse,
+    request: GeminiRequest,
+    context: LeaseContext,
+    signal: AbortSignal,
+    createMapper: () => StreamMapper,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const mapper = createMapper();
+      try {
+        await this.pumpOnce(res, request, context, signal, mapper);
+        return;
+      } catch (error) {
+        // An empty stream is worth one more ask on the same account — nothing
+        // has reached the client, so the second answer cannot duplicate the
+        // first. A deliberate silence (blocked prompt, safety stop) is not.
+        const worthRetrying =
+          attempt === 0 &&
+          error instanceof EmptyResponseError &&
+          error.retryable &&
+          !res.headersSent &&
+          !signal.aborted;
+        if (!worthRetrying) {
+          throw error;
+        }
+        Logger.warn(
+          `${context.email} returned an empty response on ${context.model.id}; asking once more`,
+        );
+      }
+    }
+  }
+
+  /** One upstream stream, mapped to the client's wire format. */
+  private async pumpOnce(
     res: http.ServerResponse,
     request: GeminiRequest,
     context: LeaseContext,
@@ -395,32 +460,63 @@ export class GatewayServer {
       signal,
     });
 
-    res.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-    });
-
-    const opening = mapper.start?.();
-    if (opening) {
-      res.write(opening);
-    }
-
-    try {
-      for await (const chunk of stream) {
-        const events = mapper.push(chunk);
-        if (events !== '') {
-          res.write(events);
+    const watch = new EmptyResponseWatch();
+    let opened = false;
+    /** Open the response on the first bytes that are worth sending. */
+    const write = (events: string) => {
+      if (events === '') {
+        return;
+      }
+      if (!opened) {
+        opened = true;
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        const opening = mapper.start?.();
+        if (opening) {
+          res.write(opening);
         }
       }
-      res.write(mapper.finish());
+      res.write(events);
+    };
+
+    let usageRecorded = false;
+    try {
+      for await (const chunk of stream) {
+        watch.note(chunk);
+        write(mapper.push(chunk));
+      }
+
+      const empty = watch.failure();
+      if (empty) {
+        // Report it before the usage is recorded and the response committed,
+        // so a retry or another account can still serve this turn.
+        Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
+        await this.deps.lease.recordUsage(context, mapper.usage());
+        usageRecorded = true;
+        throw empty;
+      }
+
+      write(mapper.finish());
     } catch (error) {
+      if (!opened) {
+        // Nothing has been sent: let the caller decide, with the full range of
+        // responses — another account, a retry, or a proper status code.
+        if (!usageRecorded) {
+          await this.deps.lease.recordUsage(context, mapper.usage());
+        }
+        throw error;
+      }
       Logger.error('Stream failed mid-response', error);
       res.write(mapper.error(describe(error)));
-    } finally {
-      await this.deps.lease.recordUsage(context, mapper.usage());
-      res.end();
     }
+
+    if (!usageRecorded) {
+      await this.deps.lease.recordUsage(context, mapper.usage());
+    }
+    res.end();
   }
 
   // ── Errors ─────────────────────────────────────────────────────────────────
@@ -461,6 +557,25 @@ export class GatewayServer {
         // the client is told outright not to retry it.
         ...(isRetryable(status) ? retryAfterHeader(error.retryAfterSeconds) : { 'x-should-retry': 'false' }),
       });
+      return;
+    }
+
+    if (error instanceof EmptyResponseError) {
+      // Two different answers. A stream that arrived empty is a blip worth one
+      // more attempt, so it goes back as a retryable 502 with the reason in
+      // it. A prompt the upstream refused to answer would come back empty
+      // however often it is sent, and the client is told so outright —
+      // without that, the agents retry until they run out and print their own
+      // "no response was returned", which is where this whole failure used to
+      // end up with nothing to explain it.
+      Logger.warn(`Empty upstream response: ${error.message}`);
+      if (error.retryable) {
+        sendJson(res, 502, errorBody('api_error', error.message), retryAfterHeader(1));
+      } else {
+        sendJson(res, 400, errorBody('invalid_request_error', error.message), {
+          'x-should-retry': 'false',
+        });
+      }
       return;
     }
 

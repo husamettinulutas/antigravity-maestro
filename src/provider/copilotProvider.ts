@@ -15,6 +15,7 @@ import { sanitizeToolSchema } from '../protocol/schema';
 import { signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
+import { EmptyResponseError, EmptyResponseWatch } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { prefixedId } from '../utils/ids';
 import { Logger } from '../utils/logger';
@@ -118,18 +119,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
             `prompt~${size.prompt} (tools ${size.tools}, attachments ${size.attachments})`,
         );
 
-        const stream = await this.client.streamGenerate({
-          model: context.model.id,
-          request,
-          accessToken: context.accessToken,
-          projectId: context.projectId,
-          accountId: context.accountId,
-      accountEmail: context.email,
-          signal: abort.signal,
-          requestType: 'agent',
-        });
-
-        await this.pumpStream(stream, progress, context, token);
+        await this.runTurn(request, context, progress, token, abort.signal);
       }, abort.signal);
     } catch (error) {
       if (token.isCancellationRequested) {
@@ -156,6 +146,54 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
 
   // ── Streaming ──────────────────────────────────────────────────────────────
 
+  /**
+   * Run one turn against the leased account, asking a second time if the first
+   * stream came back empty.
+   *
+   * The retry is safe precisely because the stream produced nothing: no output
+   * has reached the user, so nothing can be duplicated. It is what the user
+   * was doing by hand — the issue this fixes describes sending another message
+   * and getting an answer — and it stays on the same account, because an empty
+   * stream says nothing about the account's standing.
+   */
+  private async runTurn(
+    request: GeminiRequest,
+    context: LeaseContext,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+    token: vscode.CancellationToken,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const stream = await this.client.streamGenerate({
+        model: context.model.id,
+        request,
+        accessToken: context.accessToken,
+        projectId: context.projectId,
+        accountId: context.accountId,
+        accountEmail: context.email,
+        signal,
+        requestType: 'agent',
+      });
+
+      try {
+        await this.pumpStream(stream, progress, context, token);
+        return;
+      } catch (error) {
+        const emptyAndWorthRetrying =
+          attempt === 0 &&
+          error instanceof EmptyResponseError &&
+          error.retryable &&
+          !token.isCancellationRequested;
+        if (!emptyAndWorthRetrying) {
+          throw error;
+        }
+        Logger.warn(
+          `${context.email} returned an empty response on ${context.model.id}; asking once more`,
+        );
+      }
+    }
+  }
+
   private async pumpStream(
     stream: AsyncGenerator<GeminiResponse>,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
@@ -163,6 +201,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     token: vscode.CancellationToken,
   ): Promise<void> {
     let emitted = false;
+    const watch = new EmptyResponseWatch();
     // Gemini repeats the running totals on nearly every chunk, so only the
     // final figures are recorded — writing each chunk would put the history on
     // disk hundreds of times per answer and redraw the panel with it. The
@@ -177,13 +216,30 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
           return;
         }
 
+        watch.note(chunk);
+
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-          emitted = this.reportPart(part, progress) || emitted;
+          if (this.reportPart(part, progress)) {
+            emitted = true;
+            // Thoughts count as output here even though they carry no answer:
+            // once they have been shown, re-asking would show them twice.
+            watch.markProduced();
+          }
         }
 
         if (chunk.usageMetadata) {
           usage = mergeUsage(usage, chunk.usageMetadata);
         }
+      }
+
+      // A stream that closed without producing anything is a failure the
+      // upstream never reported. Left alone it reaches Copilot Chat as a
+      // finished turn with no content, which it prints as "Sorry, no response
+      // was returned" — with nothing in the log to say why.
+      const empty = watch.failure();
+      if (empty && !token.isCancellationRequested) {
+        Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
+        throw empty;
       }
     } catch (error) {
       // Once output has reached the user, switching accounts would duplicate

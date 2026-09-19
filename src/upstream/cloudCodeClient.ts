@@ -313,6 +313,16 @@ export class CloudCodeClient {
           Logger.warn(`Skipping unparsable upstream chunk: ${data.slice(0, 200)}`);
           continue;
         }
+        // The upstream accepts the request, opens the stream, and only then
+        // reports a rate limit or an outage — as a chunk carrying `error`
+        // instead of candidates. Yielding it as if it were a response left the
+        // caller with a stream that produced nothing and blamed no one; thrown
+        // here, it goes through the same classification as a refusal on the
+        // response headers, so the account can be rotated or backed off.
+        const failure = inStreamError(payload);
+        if (failure) {
+          throw failure;
+        }
         yield (payload.response ?? payload) as GeminiResponse;
       }
     }
@@ -750,6 +760,56 @@ function describe(error: unknown): string {
   // clue to whether the host is overloaded or the model is.
   const text = error instanceof Error ? error.message : String(error);
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
+/**
+ * The `UpstreamError` for a stream chunk that carries a failure instead of a
+ * candidate, or `undefined` when the chunk is an ordinary response.
+ *
+ * Both shapes are seen in the wild: the bare `{ "error": … }` of the public
+ * API, and the internal envelope's `{ "response": { "error": … } }`. The status
+ * is taken from `code` when it is an HTTP status and inferred from `status`
+ * otherwise, so that a `RESOURCE_EXHAUSTED` arriving mid-stream backs the
+ * account off exactly as the same refusal on the response headers would.
+ */
+function inStreamError(payload: any): UpstreamError | undefined {
+  const failure = payload?.error ?? payload?.response?.error;
+  if (!failure || typeof failure !== 'object') {
+    return undefined;
+  }
+
+  const body = JSON.stringify(failure);
+  const status = typeof failure.code === 'number' && failure.code >= 400 && failure.code < 600
+    ? failure.code
+    : statusFromName(failure.status);
+  const message = typeof failure.message === 'string' && failure.message !== ''
+    ? failure.message
+    : `Upstream ended the stream with ${failure.status ?? 'an error'}`;
+
+  Logger.warn(`Upstream reported an error inside the stream: ${describe(new Error(message))}`);
+  return new UpstreamError(message, status, body, retryDelayOf(body));
+}
+
+/** HTTP status for the gRPC status names the upstream sends mid-stream. */
+function statusFromName(name: unknown): number | undefined {
+  switch (name) {
+    case 'RESOURCE_EXHAUSTED':
+      return 429;
+    case 'UNAUTHENTICATED':
+      return 401;
+    case 'PERMISSION_DENIED':
+      return 403;
+    case 'INVALID_ARGUMENT':
+    case 'FAILED_PRECONDITION':
+      return 400;
+    case 'UNAVAILABLE':
+      return 503;
+    case 'INTERNAL':
+    case 'UNKNOWN':
+      return 500;
+    default:
+      return undefined;
+  }
 }
 
 function parseJson(text: string): any {

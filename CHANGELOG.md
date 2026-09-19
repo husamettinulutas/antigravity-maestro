@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.13
+
+- **An empty answer is no longer silent.** A request could end with nothing
+  shown and nothing logged — Copilot Chat printed "Sorry, no response was
+  returned", the agents retried until they gave up, and sending the same
+  message again worked. Three separate silences were behind it:
+
+  - A failure the upstream reports *inside* the stream, as a chunk carrying
+    `error` instead of candidates, was yielded on as if it were a response.
+    A rate limit arriving that way now backs the account off and rotates to
+    another one, exactly as the same refusal on the response headers does.
+
+  - A stream that closed without a word, a tool call or a thought in it was
+    treated as a finished turn. It is now a failure that says why, is logged
+    with the account and model it happened on, and is asked once more on the
+    same account — which is what the user was doing by hand. A deliberate
+    silence (a blocked prompt, a safety stop) is reported rather than
+    retried, so clients stop retrying a request that cannot succeed.
+
+  - The gateway wrote its `200` as soon as the upstream accepted the request,
+    which left a mid-stream failure nowhere to go. Headers are now held back
+    until there is content to send, so a failure before the first word is an
+    ordinary one: another account can still serve the turn.
+
 ## 1.0.12
 
 - Client identity headers vary per account instead of sharing the host's
