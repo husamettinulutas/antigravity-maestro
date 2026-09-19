@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12
+
+- Client identity headers vary per account instead of sharing the host's
+  values, the way the upstream expects for concurrent use.
+
 ## 1.0.11
 
 - **A moment's 503 from the sandbox host no longer costs five minutes of

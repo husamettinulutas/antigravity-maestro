@@ -514,7 +514,7 @@ export class CloudCodeClient {
   }
 
   private buildHeaders(params: GenerateParams, projectHeaderDisabled: boolean) {
-    const identity = clientIdentity();
+    const identity = clientIdentity(params.accountId);
     const headers: Record<string, string> = {
       authorization: `Bearer ${params.accessToken}`,
       'content-type': 'application/json',

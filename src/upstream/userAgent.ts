@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { Config } from '../utils/config';
 import { readBody, request } from '../utils/http';
@@ -55,18 +56,39 @@ export function currentVersion(): string {
 const VERSION_REGEX_SINGLE = /\d+\.\d+\.\d+/;
 
 /**
- * Device and session identity, as the official client reports it.
- *
- * The Cloud Code endpoints meter an anonymous caller far more tightly than a
- * recognised one, and these two headers plus `x-client-name` are what a real
- * Antigravity install sends. VS Code already keeps exactly the right values:
- * `machineId` is stable per install, `sessionId` per window launch.
+ * Client identity headers. When an `accountId` is given each account gets
+ * its own stable values so concurrent use is not correlated upstream.
  */
-export function clientIdentity(): { machineId: string; sessionId: string } {
+export function clientIdentity(accountId?: string): { machineId: string; sessionId: string } {
+  if (accountId) {
+    return {
+      machineId: accountMachineId(accountId),
+      sessionId: accountSessionId(accountId),
+    };
+  }
   return {
     machineId: fallbackTo(() => vscode.env.machineId, stableMachineId),
     sessionId: fallbackTo(() => vscode.env.sessionId, () => launchSessionId),
   };
+}
+
+function accountMachineId(accountId: string): string {
+  const hash = crypto
+    .createHash('sha256')
+    .update(`antigravity-machine:${accountId}`)
+    .digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+const accountSessionIds = new Map<string, string>();
+
+function accountSessionId(accountId: string): string {
+  let id = accountSessionIds.get(accountId);
+  if (!id) {
+    id = uuid();
+    accountSessionIds.set(accountId, id);
+  }
+  return id;
 }
 
 const launchSessionId = uuid();
