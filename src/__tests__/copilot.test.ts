@@ -14,7 +14,13 @@ const resolveFilename = (Module as any)._resolveFilename;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { convertMessages, buildTools, rejectedToolIndex } = require('../provider/copilotProvider');
+const {
+  convertMessages,
+  buildTools,
+  rejectedToolIndex,
+  compactTokens,
+  windowFill,
+} = require('../provider/copilotProvider');
 const vscode = require('vscode');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { signatureStore } = require('../protocol/signatureStore');
@@ -229,4 +235,27 @@ test('copilot: a model that does not think keeps its unsigned tool calls', () =>
     name: 'listDir',
     args: { path: '.' },
   });
+});
+
+// ── The context window in the picker ──────────────────────────────────────────
+
+test('picker: a window is labelled the way the models are usually quoted', () => {
+  assert.equal(compactTokens(200_000), '200K');
+  assert.equal(compactTokens(1_048_576), '1M');
+  assert.equal(compactTokens(128_000), '128K');
+  assert.equal(compactTokens(900), '900');
+});
+
+test('picker: a prompt is measured against the window it has to fit', () => {
+  // 370k characters is ~100k tokens at the ratio the estimate uses: half of a
+  // 200k window, and a twentieth of a 1M one. The same conversation, two
+  // models — which is the whole of what a switch changes.
+  const claude = windowFill(370_000, 200_000);
+  assert.equal(claude?.percent, 50);
+  assert.equal(claude?.window, '200K');
+  assert.equal(claude?.tokens, '100K');
+
+  assert.equal(windowFill(370_000, 1_048_576)?.percent, 10);
+  // A model that publishes no window cannot be measured against one.
+  assert.equal(windowFill(370_000, 0), undefined);
 });

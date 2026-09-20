@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.15
+
+- **The picker says how much context a model has, before you switch to it.**
+  Moving a long conversation from a Gemini model to a Claude one makes Copilot
+  Chat compact it — the "Compacting conversation…" turn — because the windows
+  differ by roughly five times, and that summary is charged to the account
+  like any other turn. Nothing said so until it had happened. Every model now
+  carries its window in the picker, and the hover on a model with a smaller
+  one than its neighbours says what switching to it will cost.
+
+- Each request logs the share of the window its prompt fills, and warns past
+  80%. A compaction was indistinguishable from an ordinary turn in the log,
+  which made an expensive one impossible to account for after the fact.
+
 ## 1.0.14
 
 - **A tool call made by one model no longer breaks the next one.** Switching

@@ -85,21 +85,27 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       return [];
     }
 
-    return this.catalog
-      .listAll()
-      .filter((model) => model.family !== 'image')
-      .map((model) => ({
-        id: model.id,
-        name: model.displayName,
-        family: 'Antigravity Maestro',
-        version: '1.0.0',
-        maxInputTokens: model.maxInputTokens,
-        maxOutputTokens: model.maxOutputTokens,
-        capabilities: {
-          imageInput: model.supportsImages,
-          toolCalling: model.supportsTools,
-        },
-      }));
+    const models = this.catalog.listAll().filter((model) => model.family !== 'image');
+    // The largest window on offer, so a model can say it is the smaller one.
+    const widest = Math.max(0, ...models.map((model) => model.maxInputTokens));
+
+    return models.map((model) => ({
+      id: model.id,
+      name: model.displayName,
+      family: 'Antigravity Maestro',
+      version: '1.0.0',
+      maxInputTokens: model.maxInputTokens,
+      maxOutputTokens: model.maxOutputTokens,
+      // The window is in the picker because switching to a smaller one is what
+      // makes Copilot Chat compact the conversation — an expensive turn the
+      // user never asked for, and one they could only discover afterwards.
+      detail: `${compactTokens(model.maxInputTokens)} context`,
+      tooltip: tooltipFor(model, widest),
+      capabilities: {
+        imageInput: model.supportsImages,
+        toolCalling: model.supportsTools,
+      },
+    }));
   }
 
   async provideLanguageModelChatResponse(
@@ -118,11 +124,23 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         const request = this.buildRequest(messages, options, context, model);
         declarations = request.tools?.[0]?.functionDeclarations;
         const size = measureRequest(request);
+        // The share of the window a prompt fills is the one number that
+        // explains a compaction after the fact: Copilot Chat rewrites the
+        // conversation when it stops fitting, and until this was logged there
+        // was no way to tell that turn from an ordinary one.
+        const fill = windowFill(size.characters, context.model.maxInputTokens);
         Logger.info(
           `Copilot request: model=${context.model.id}, account=${context.email}, ` +
             `messages=${request.contents.length}, tools=${declarations?.length ?? 0}, ` +
-            `prompt~${size.prompt} (tools ${size.tools}, attachments ${size.attachments})`,
+            `prompt~${size.prompt} (tools ${size.tools}, attachments ${size.attachments})` +
+            (fill ? `, ~${fill.tokens} of ${fill.window} context (${fill.percent}%)` : ''),
         );
+        if (fill && fill.percent >= 80) {
+          Logger.warn(
+            `Prompt fills ${fill.percent}% of ${context.model.id}'s ${fill.window} context; ` +
+              'Copilot Chat compacts the conversation once it no longer fits',
+          );
+        }
 
         const overflow = overlongPrompt(size.characters, context.model);
         if (overflow) {
@@ -633,6 +651,63 @@ function measureRequest(request: GeminiRequest): {
 
 function kilobytes(characters: number): string {
   return `${Math.round(characters / 1024)}KB`;
+}
+
+/**
+ * How much of a model's context window a prompt takes up, by the same rough
+ * ratio the token count estimate uses. `undefined` when the model publishes no
+ * window to measure against.
+ */
+export function windowFill(
+  characters: number,
+  maxInputTokens: number,
+): { tokens: string; window: string; percent: number } | undefined {
+  if (!(maxInputTokens > 0)) {
+    return undefined;
+  }
+  const tokens = Math.ceil(characters / CHARS_PER_TOKEN);
+  return {
+    tokens: compactTokens(tokens),
+    window: compactTokens(maxInputTokens),
+    percent: Math.round((tokens / maxInputTokens) * 100),
+  };
+}
+
+/** A token count as the picker shows it: `200K`, `1M`. */
+export function compactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_048_576;
+    return `${millions >= 10 ? Math.round(millions) : Math.round(millions * 10) / 10}M`;
+  }
+  if (tokens >= 1000) {
+    return `${Math.round(tokens / 1000)}K`;
+  }
+  return String(tokens);
+}
+
+/**
+ * What hovering a model in the picker says.
+ *
+ * The note about compaction is only on the models it can happen to. Copilot
+ * Chat rewrites a conversation that no longer fits the chosen model — the
+ * "Compacting conversation…" turn — and that turn is charged to the account
+ * like any other, so a switch from a 1M-token model to a 200K one can cost
+ * more than the answer that prompted it. Knowing which way the switch goes is
+ * the whole of the defence, and nothing in the picker used to say.
+ */
+function tooltipFor(
+  model: { displayName: string; maxInputTokens: number; maxOutputTokens: number },
+  widest: number,
+): string {
+  const sizes =
+    `${compactTokens(model.maxInputTokens)} context, up to ` +
+    `${compactTokens(model.maxOutputTokens)} output`;
+  const warning =
+    model.maxInputTokens < widest
+      ? ' — switching to it from a larger-context model makes Copilot compact the ' +
+        'conversation first, which costs a turn of its own'
+      : '';
+  return `${model.displayName} · ${sizes}${warning}`;
 }
 
 

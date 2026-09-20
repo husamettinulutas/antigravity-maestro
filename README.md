@@ -110,6 +110,12 @@ gemini-3-flash           gemini-3.5-flash-low       gpt-oss-120b-medium
 The authoritative list comes from each account's own quota response, so it reflects what Google
 actually serves that account.
 
+Each model in Copilot's picker shows the size of its context window, because the windows differ by
+an order of magnitude — around 1M tokens for the Gemini models against 200K for the Claude ones.
+Switching a long conversation to a smaller window makes Copilot Chat compact it first ("Compacting
+conversation…"), and that summary is a model turn like any other: it is charged to the account.
+Starting a new chat for the new model avoids it.
+
 ## Gateway API
 
 Claude Code and Codex speak HTTP, so the extension runs a server on `127.0.0.1:8765` (configurable),
