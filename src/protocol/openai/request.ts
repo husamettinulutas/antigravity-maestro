@@ -30,11 +30,7 @@ export function responsesToGemini(
 ): GeminiRequest {
   const items = normalizeInput(body.input);
   const toolNames = collectToolNames(items);
-  const unsigned = unsignedCallIds(
-    items.map((item) => (item.type === 'function_call' ? item.call_id : undefined)),
-    model,
-    requiresSignature,
-  );
+  const unsigned = unsignedCallIds(responseSteps(items), model, requiresSignature);
   const contents: GeminiContent[] = [];
 
   for (const item of items) {
@@ -80,12 +76,17 @@ export function chatToGemini(
   requiresSignature = false,
 ): GeminiRequest {
   const toolNames = new Map<string, string>();
+  const steps: string[][] = [];
   for (const message of body.messages ?? []) {
     for (const call of message.tool_calls ?? []) {
       toolNames.set(call.id, call.function.name);
     }
+    // One assistant message is one step: its calls were made together.
+    if (message.tool_calls?.length) {
+      steps.push(message.tool_calls.map((call) => call.id));
+    }
   }
-  const unsigned = unsignedCallIds([...toolNames.keys()], model, requiresSignature);
+  const unsigned = unsignedCallIds(steps, model, requiresSignature);
 
   const contents: GeminiContent[] = [];
   const systemChunks: string[] = [];
@@ -155,11 +156,16 @@ export function chatToGemini(
  * request valid. The set is computed up front because a call and its result
  * are converted separately and the two decisions have to agree.
  *
+ * `steps` holds the calls made together, in order, and the first call decides
+ * for its step: Gemini signs only the first call of a parallel batch and checks
+ * only that one. Judging each call on its own retold every parallel call after
+ * the first as text.
+ *
  * Only Gemini needs this: the Claude and GPT models are served by translating
  * the request back out of the Gemini shape, and an unsigned call survives it.
  */
 function unsignedCallIds(
-  callIds: readonly (string | undefined)[],
+  steps: readonly (readonly string[])[],
   model: string,
   requiresSignature: boolean,
 ): ReadonlySet<string> {
@@ -168,12 +174,36 @@ function unsignedCallIds(
     return unsigned;
   }
 
-  for (const callId of callIds) {
-    if (callId && !signatureStore.forToolCall(callId, model)) {
-      unsigned.add(callId);
+  for (const step of steps) {
+    if (step.length > 0 && !signatureStore.forToolCall(step[0], model)) {
+      step.forEach((callId) => unsigned.add(callId));
     }
   }
   return unsigned;
+}
+
+/**
+ * The Responses history's tool calls grouped into steps. A step is a run of
+ * `function_call` items with nothing between them — how a parallel batch
+ * appears in the flat item list.
+ */
+function responseSteps(items: readonly ResponsesInputItem[]): string[][] {
+  const steps: string[][] = [];
+  let current: string[] | undefined;
+  for (const item of items) {
+    if (item.type !== 'function_call') {
+      current = undefined;
+      continue;
+    }
+    if (!current) {
+      current = [];
+      steps.push(current);
+    }
+    if (item.call_id) {
+      current.push(item.call_id);
+    }
+  }
+  return steps;
 }
 
 // ── Responses items ───────────────────────────────────────────────────────────

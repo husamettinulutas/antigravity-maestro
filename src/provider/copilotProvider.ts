@@ -13,13 +13,16 @@ import {
 } from '../protocol/gemini';
 import { sanitizeToolSchema } from '../protocol/schema';
 import { signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
-import { CloudCodeClient } from '../upstream/cloudCodeClient';
+import { CloudCodeClient, StreamBrokenError } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
+  Silence,
+  describeSilence,
+  describeTail,
   overlongPrompt,
-  overlongResponse,
+  retryAfter,
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { prefixedId } from '../utils/ids';
@@ -27,6 +30,34 @@ import { Logger } from '../utils/logger';
 
 /** Rough characters-per-token ratio used for the token count estimate. */
 const CHARS_PER_TOKEN = 3.7;
+
+/**
+ * What one attached image is counted as. Its bytes say nothing useful — the
+ * base64 of a screenshot would read as tens of thousands of tokens — and the
+ * models charge a bounded amount per image: Gemini 3 about 1,100 at its default
+ * resolution, Claude up to about 1,600.
+ */
+const IMAGE_TOKENS = 1_600;
+
+/**
+ * The tool Copilot Chat's autopilot gives the model to say the task is done.
+ * It is a control signal for Copilot's loop, not work: its result is the
+ * model's own summary handed back to it.
+ */
+const TASK_COMPLETE_TOOL = 'task_complete';
+
+/**
+ * What a turn that ends with nothing to show reports to Copilot Chat.
+ *
+ * Copilot counts a response as a success only when it carries text or a tool
+ * call; anything else is "Sorry, no response was returned", and a thrown error
+ * is "Sorry, your request failed" — and in autopilot both are sent again,
+ * identically, three times over. A line break is text, so the turn succeeds,
+ * yet it renders as nothing and is dropped from later prompts, and autopilot's
+ * own rules still apply: it stops after `task_complete`, and nudges the model
+ * itself if the task is not marked done.
+ */
+const NOTHING_TO_ADD = '\n';
 
 /**
  * Exposes the Antigravity models to Copilot Chat's model picker and runs
@@ -115,6 +146,19 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
   ): Promise<void> {
+    if (followsTaskComplete(messages, options)) {
+      // Autopilot always sends one more request after the model calls
+      // task_complete, carrying only that call's result — the model's own
+      // summary, which the tool tells it not to restate. The model rightly
+      // answers with nothing, and that answer was billed as a full-context
+      // request. Ending the turn here is the answer it would have given.
+      Logger.info(
+        `Copilot request after task_complete on ${model.id}; ending the turn without asking again`,
+      );
+      progress.report(new vscode.LanguageModelTextPart(NOTHING_TO_ADD));
+      return;
+    }
+
     const abort = new AbortController();
     const cancellation = token.onCancellationRequested(() => abort.abort());
     let declarations: FunctionDeclaration[] | undefined;
@@ -148,7 +192,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         }
 
         await this.runTurn(request, context, progress, token, abort.signal);
-      }, abort.signal);
+      }, abort.signal, conversationOf(options));
     } catch (error) {
       if (token.isCancellationRequested) {
         return;
@@ -156,33 +200,50 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       const message = error instanceof Error ? error.message : String(error);
       Logger.error(`Copilot request failed: ${message}`, error);
       logRejectedTool(message, declarations);
-      progress.report(new vscode.LanguageModelTextPart(`\n\n⚠️ ${message}`));
+      // No warning text before the throw: Copilot already prints the reason,
+      // and text streamed ahead of a failure is never cleared — autopilot's
+      // retries stacked one warning line per attempt, and after a reload the
+      // text could come back in the history as something the model had said.
       throw error;
     } finally {
       cancellation.dispose();
     }
   }
 
+  /**
+   * Copilot Chat budgets every prompt with this, and compacts the conversation
+   * once the budget runs out — so a count that runs low is a compaction that
+   * comes too late, and a prompt past the model's limit, which the upstream
+   * bills and answers with nothing. Tool-call arguments used to count for
+   * nothing, though in an agent session they are much of the prompt: every
+   * file an edit tool wrote travels in them.
+   */
   async provideTokenCount(
     _model: vscode.LanguageModelChatInformation,
     text: string | vscode.LanguageModelChatRequestMessage,
     _token: vscode.CancellationToken,
   ): Promise<number> {
-    const raw = typeof text === 'string' ? text : extractText(text.content);
-    return Math.max(1, Math.ceil(raw.length / CHARS_PER_TOKEN));
+    const size = typeof text === 'string' ? { characters: text.length, images: 0 } : measureParts(text.content);
+    return Math.max(1, Math.ceil(size.characters / CHARS_PER_TOKEN) + size.images * IMAGE_TOKENS);
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────
 
   /**
-   * Run one turn against the leased account, asking a second time if the first
-   * stream came back empty.
+   * Run one turn against the leased account, and settle a turn that brought
+   * no answer instead of failing it.
    *
-   * The retry is safe precisely because the stream produced nothing: no output
-   * has reached the user, so nothing can be duplicated. It is what the user
-   * was doing by hand — the issue this fixes describes sending another message
-   * and getting an answer — and it stays on the same account, because an empty
-   * stream says nothing about the account's standing.
+   * Copilot Chat sends a failed request again — in autopilot three times,
+   * identically — and each attempt is billed in full. So a silence is only an
+   * error when asking again could change it: a stream cut off before it
+   * finished. A model that ended its turn with nothing to say is nudged once
+   * with a continuation prompt, since the identical request would only get the
+   * same decision, and then its turn ends. A refusal is explained in the
+   * answer, where it ends the turn instead of starting a round of retries.
+   *
+   * Asking again is safe because nothing but reasoning reached the user, and it
+   * stays on the same account: a silence says nothing about an account's
+   * standing.
    */
   private async runTurn(
     request: GeminiRequest,
@@ -191,10 +252,11 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     token: vscode.CancellationToken,
     signal: AbortSignal,
   ): Promise<void> {
+    let current = request;
     for (let attempt = 0; ; attempt++) {
       const stream = await this.client.streamGenerate({
         model: context.model.id,
-        request,
+        request: current,
         accessToken: context.accessToken,
         projectId: context.projectId,
         accountId: context.accountId,
@@ -203,31 +265,53 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         requestType: 'agent',
       });
 
+      let silence: Silence | undefined;
       try {
-        await this.pumpStream(stream, progress, context, token);
-        return;
+        silence = await this.pumpStream(stream, progress, context, token);
       } catch (error) {
-        const emptyAndWorthRetrying =
-          attempt === 0 &&
-          error instanceof EmptyResponseError &&
-          error.retryable &&
-          !token.isCancellationRequested;
-        if (!emptyAndWorthRetrying) {
-          throw error;
+        // A stream that broke off before anything reached the user is asked
+        // again once, unchanged: nothing was decided, and nothing can be
+        // shown twice. Once output has gone out it arrives here as
+        // "Response interrupted" instead, and is not retried.
+        if (attempt === 0 && error instanceof StreamBrokenError && !token.isCancellationRequested) {
+          Logger.warn(`${context.email} on ${context.model.id}: ${error.message} Asking once more.`);
+          continue;
         }
-        Logger.warn(
-          `${context.email} returned an empty response on ${context.model.id}; asking once more`,
-        );
+        throw error;
       }
+      if (!silence || token.isCancellationRequested) {
+        return;
+      }
+
+      Logger.warn(
+        `${context.email} on ${context.model.id}: ${describeSilence(silence)}; ` +
+          `the request ended with ${describeTail(current)}`,
+      );
+
+      const again = attempt === 0 ? retryAfter(silence, current) : undefined;
+      if (again) {
+        Logger.info(
+          again === current ? 'Asking once more, unchanged' : 'Asking once more, with a nudge to continue',
+        );
+        current = again;
+        continue;
+      }
+
+      settleSilence(silence, progress);
+      return;
     }
   }
 
+  /**
+   * Stream one upstream response into Copilot Chat. Returns why it carried no
+   * answer, or `undefined` when it did (or the user cancelled).
+   */
   private async pumpStream(
     stream: AsyncGenerator<GeminiResponse>,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     context: LeaseContext,
     token: vscode.CancellationToken,
-  ): Promise<void> {
+  ): Promise<Silence | undefined> {
     let emitted = false;
     const watch = new EmptyResponseWatch();
     // Gemini repeats the running totals on nearly every chunk, so only the
@@ -241,7 +325,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     try {
       for await (const chunk of stream) {
         if (token.isCancellationRequested) {
-          return;
+          return undefined;
         }
 
         watch.note(chunk);
@@ -249,9 +333,6 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
           if (this.reportPart(part, progress, context.model.id)) {
             emitted = true;
-            // Thoughts count as output here even though they carry no answer:
-            // once they have been shown, re-asking would show them twice.
-            watch.markProduced();
           }
         }
 
@@ -260,22 +341,11 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         }
       }
 
-      // A stream that closed without producing anything is a failure the
-      // upstream never reported. Left alone it reaches Copilot Chat as a
-      // finished turn with no content, which it prints as "Sorry, no response
-      // was returned" — with nothing in the log to say why.
-      const empty = watch.failure();
-      if (empty && !token.isCancellationRequested) {
-        // An overlong prompt is the one silence with a known cause, and asking
-        // again would buy the same silence at the same price.
-        const tooLong = overlongResponse(usage, context.model);
-        if (tooLong) {
-          Logger.warn(`Overlong prompt on ${context.model.id}: ${tooLong}`);
-          throw new EmptyResponseError(tooLong, false);
-        }
-        Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
-        throw empty;
+      if (token.isCancellationRequested) {
+        return undefined;
       }
+      reportUsage(progress, usage);
+      return watch.silence(context.model);
     } catch (error) {
       // Once output has reached the user, switching accounts would duplicate
       // it — surface the failure instead of letting the lease retry.
@@ -379,6 +449,116 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
   }
 }
 
+/**
+ * End a turn that brought no answer in the way that stops Copilot Chat from
+ * asking again for nothing.
+ *
+ * Copilot retries every failure the same way whatever its cause, so only a
+ * stream that was cut off is thrown — asking again is the remedy there. A model
+ * that finished with nothing to say gets an empty line, which Copilot counts
+ * as a finished turn. A refusal is explained in the answer instead of thrown:
+ * each retry of it would be billed for the same refusal, and in autopilot an
+ * answer ends the run where a failure would start three more attempts.
+ */
+function settleSilence(
+  silence: Silence,
+  progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+): void {
+  switch (silence.kind) {
+    case 'finished':
+      progress.report(new vscode.LanguageModelTextPart(NOTHING_TO_ADD));
+      return;
+    case 'refused':
+    case 'brokenCall':
+      progress.report(new vscode.LanguageModelTextPart(`⚠️ ${silence.message}`));
+      return;
+    case 'cutOff':
+      throw new EmptyResponseError(silence.message, true);
+  }
+}
+
+/**
+ * Hand Copilot Chat the upstream's own token counts for a response.
+ *
+ * Copilot reads a `usage` data part for its context-window indicator and for
+ * deciding when to compact a conversation in the background. Without one both
+ * ran on zeros — the indicator read empty, and compaction had only the
+ * character estimate to go on. The count is the prompt the upstream actually
+ * saw, cached tokens included, and the answer that will be part of the next
+ * one; reasoning is left out, because it is not sent back.
+ */
+function reportUsage(
+  progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+  usage: UsageMetadata | undefined,
+): void {
+  const DataPart = (vscode as any).LanguageModelDataPart;
+  if (!usage?.promptTokenCount || typeof DataPart !== 'function') {
+    return;
+  }
+
+  const prompt = usage.promptTokenCount;
+  const completion = usage.candidatesTokenCount ?? 0;
+  const payload = {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: prompt + completion,
+    prompt_tokens_details: { cached_tokens: usage.cachedContentTokenCount ?? 0 },
+  };
+  progress.report(
+    new DataPart(new TextEncoder().encode(JSON.stringify(payload)), 'usage') as vscode.LanguageModelResponsePart,
+  );
+}
+
+/**
+ * The conversation a request belongs to, as Copilot Chat names it: the chat
+ * session, which stays the same across every turn, compactions included.
+ */
+function conversationOf(options: vscode.ProvideLanguageModelChatResponseOptions): string | undefined {
+  const id = (options as { modelOptions?: { _conversationId?: unknown } }).modelOptions?._conversationId;
+  return typeof id === 'string' && id !== '' ? `copilot:${id}` : undefined;
+}
+
+/**
+ * True when a request exists only to let the model speak after it called
+ * `task_complete`.
+ *
+ * Copilot Chat's autopilot never stops on the round that calls the tool: it
+ * runs the tool, sends one more request ending in its result, and stops once
+ * that round comes back without tool calls. The result is the model's own
+ * summary, and the tool's description tells it not to restate it — so the
+ * right answer is nothing, and it was the answer every time. Exported for tests.
+ *
+ * Only a request whose trailing tool results all answer `task_complete`
+ * qualifies; a result from any other tool next to it may need a response.
+ */
+export function followsTaskComplete(
+  messages: readonly vscode.LanguageModelChatRequestMessage[],
+  options: { tools?: readonly { name: string }[] },
+): boolean {
+  // The tool is only offered in autopilot, and only there does the loop work
+  // this way.
+  if (!options.tools?.some((tool) => tool.name === TASK_COMPLETE_TOOL)) {
+    return false;
+  }
+
+  const names = collectToolNames(messages);
+  let answered = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    const parts = asArray(message.content);
+    if (roleOf(message) !== 'user' || parts.length === 0 || !parts.every(isToolResultPart)) {
+      break;
+    }
+    for (const part of parts) {
+      if (names.get((part as vscode.LanguageModelToolResultPart).callId) !== TASK_COMPLETE_TOOL) {
+        return false;
+      }
+      answered += 1;
+    }
+  }
+  return answered > 0;
+}
+
 // ── Message conversion ────────────────────────────────────────────────────────
 
 /**
@@ -454,6 +634,24 @@ function convertPart(
   model: string,
   unsigned: ReadonlySet<string>,
 ): GeminiPart | undefined {
+  // Copilot hands the model's earlier reasoning back as thinking parts. They
+  // carry no signature, so they cannot go back as thoughts, and sent as text
+  // they would read as things the model said to the user.
+  if (isThinkingPart(part)) {
+    return undefined;
+  }
+
+  // task_complete is autopilot's signal to stop, and its result is the model's
+  // own summary handed back. Left in, it ends every autopilot turn on a tool
+  // result, so the next prompt follows a tool result instead of the model's
+  // closing words — the shape that teaches Claude to answer with nothing.
+  if (isToolCallPart(part) && part.name === TASK_COMPLETE_TOOL) {
+    return undefined;
+  }
+  if (isToolResultPart(part) && toolNames.get(part.callId) === TASK_COMPLETE_TOOL) {
+    return undefined;
+  }
+
   if (isToolCallPart(part)) {
     const args = typeof part.input === 'object' && part.input ? (part.input as any) : {};
     if (unsigned.has(part.callId)) {
@@ -492,7 +690,9 @@ function convertPart(
   }
 
   const text = textOfPart(part);
-  return text === '' ? undefined : { text };
+  // Whitespace alone says nothing, and the Claude models reject a text block
+  // without any — a line break that ended a silent turn must not come back.
+  return text.trim() === '' ? undefined : { text };
 }
 
 /**
@@ -510,6 +710,12 @@ function convertPart(
  * pass up front because a call and its result are converted separately and the
  * two decisions have to agree.
  *
+ * The decision is made per step — one assistant turn — not per call. Gemini
+ * signs only the first call of a step; the others in a parallel batch never
+ * carry a signature, and only the first is checked. Judging each call on its
+ * own retold every parallel call after the first as text, in every turn, even
+ * with its signature safely in the store.
+ *
  * Only Gemini needs this. The Claude and GPT models are served by translating
  * the request back out of the Gemini shape, and an unsigned tool call survives
  * that translation.
@@ -525,9 +731,15 @@ function unsignedCallIds(
   }
 
   for (const message of messages) {
-    for (const part of asArray(message.content)) {
-      if (isToolCallPart(part) && !signatureStore.forToolCall(part.callId, model)) {
-        unsigned.add(part.callId);
+    // task_complete calls are dropped from the history (see `convertPart`), so
+    // the step's first call is the first of the ones that remain.
+    const calls = asArray(message.content).filter(
+      (part): part is vscode.LanguageModelToolCallPart =>
+        isToolCallPart(part) && part.name !== TASK_COMPLETE_TOOL,
+    );
+    if (calls.length > 0 && !signatureStore.forToolCall(calls[0].callId, model)) {
+      for (const call of calls) {
+        unsigned.add(call.callId);
       }
     }
   }
@@ -754,6 +966,12 @@ function isToolResultPart(part: any): part is vscode.LanguageModelToolResultPart
   return !!part && typeof part === 'object' && 'callId' in part && 'content' in part && !('name' in part);
 }
 
+/** LanguageModelThinkingPart only exists in recent VS Code builds. */
+function isThinkingPart(part: unknown): boolean {
+  const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
+  return typeof ThinkingPart === 'function' && part instanceof ThinkingPart;
+}
+
 function isImagePart(part: any): part is { data: Uint8Array; mimeType: string } {
   return (
     !!part &&
@@ -791,6 +1009,37 @@ function textOfPart(part: any): string {
     return part.value;
   }
   return '';
+}
+
+/**
+ * What a message's parts will cost once converted: the characters of the text,
+ * tool calls and tool results that go upstream, and the images, counted apart.
+ * Reasoning is left out because it is never sent back (see `convertPart`).
+ */
+function measureParts(content: unknown): { characters: number; images: number } {
+  let characters = 0;
+  let images = 0;
+  for (const part of asArray(content)) {
+    if (isThinkingPart(part)) {
+      continue;
+    }
+    if (isToolCallPart(part)) {
+      characters += part.name.length + JSON.stringify(part.input ?? {}).length;
+      continue;
+    }
+    if (isToolResultPart(part)) {
+      const inner = measureParts((part as any).content);
+      characters += inner.characters;
+      images += inner.images;
+      continue;
+    }
+    if (isImagePart(part)) {
+      images += 1;
+      continue;
+    }
+    characters += textOfPart(part).length;
+  }
+  return { characters, images };
 }
 
 function extractText(content: unknown): string {

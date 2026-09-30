@@ -105,6 +105,8 @@ export interface UsageMetadata {
 export interface GeminiCandidate {
   content?: GeminiContent;
   finishReason?: string;
+  /** The upstream's own explanation of an unusual stop, such as a malformed call. */
+  finishMessage?: string;
   index?: number;
 }
 

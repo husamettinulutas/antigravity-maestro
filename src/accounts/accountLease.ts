@@ -71,6 +71,21 @@ const SHARED_LIMIT_STRIKES = 3;
 /** Retry delays this close together are the same window being reported. */
 const SHARED_LIMIT_SPREAD_SECONDS = 5;
 
+/**
+ * How long a conversation keeps its account after its last request: enough to
+ * span the pauses in an agent session — a user reading a diff, a slow build —
+ * and short enough that an abandoned chat stops holding one.
+ */
+const SESSION_TTL_MS = 10 * 60_000;
+
+/** Conversations remembered at once; past this the idle ones are let go. */
+const MAX_SESSIONS = 500;
+
+interface SessionBinding {
+  accountId: string;
+  lastUsed: number;
+}
+
 interface SharedCooldown {
   until: number;
   reason: string;
@@ -100,13 +115,19 @@ export class AccountLease {
   private readonly cooldowns = new Map<string, Cooldown>();
   /** Windows that apply to the client as a whole, keyed by upstream model id. */
   private readonly sharedCooldowns = new Map<string, SharedCooldown>();
+  /** Conversation → the account serving it; see `preferSession`. */
+  private readonly sessions = new Map<string, SessionBinding>();
   private roundRobinIndex = 0;
 
   constructor(
     private readonly accounts: AccountManager,
     private readonly catalog: ModelCatalog,
     private readonly history: QuotaHistory,
-  ) {}
+  ) {
+    // An account picked by hand is where the user wants every request to go,
+    // conversations already under way included.
+    accounts.onDidChooseActive?.(() => this.sessions.clear());
+  }
 
   /**
    * Run `execute` against the best available account for `requestedModel`.
@@ -116,19 +137,27 @@ export class AccountLease {
    * once and the whole selection is retried, because that window is usually
    * seconds long: reporting it straight back is what turned a burst of
    * parallel turns into a failed one.
+   *
+   * `session` names the conversation the request belongs to, when the client
+   * says; its requests stay on one account while that account can serve them.
    */
   async run<T>(
     requestedModel: string,
     execute: (context: LeaseContext) => Promise<T>,
     signal?: AbortSignal,
+    session?: string,
   ): Promise<T> {
     let lastError: unknown;
     let waited = false;
 
     for (;;) {
-      const candidates = this.orderCandidates(requestedModel);
+      const candidates = this.preferSession(
+        this.orderCandidates(requestedModel),
+        requestedModel,
+        session,
+      );
       if (candidates.length > 0) {
-        const outcome = await this.tryCandidates(requestedModel, candidates, execute);
+        const outcome = await this.tryCandidates(requestedModel, candidates, execute, session);
         if (outcome.served) {
           return outcome.result as T;
         }
@@ -163,9 +192,11 @@ export class AccountLease {
     requestedModel: string,
     candidates: AccountMetadata[],
     execute: (context: LeaseContext) => Promise<T>,
+    session?: string,
   ): Promise<{ served: boolean; result?: T; error?: unknown }> {
     let lastError: unknown;
     const strikes: RateLimitStrike[] = [];
+    const bound = session ? this.sessions.get(session)?.accountId : undefined;
 
     for (const account of candidates) {
       const model = this.catalog.resolve(requestedModel, account.id);
@@ -193,7 +224,13 @@ export class AccountLease {
         });
 
         this.clearCooldown(account.id, model.id);
-        await this.promoteIfRotated(account);
+        // A conversation served by its own account is not a rotation. Promoting
+        // it would flip the active account back and forth between parallel
+        // conversations on every request, and redraw the UI each time.
+        if (account.id !== bound) {
+          await this.promoteIfRotated(account);
+        }
+        this.bindSession(session, account.id);
         return { served: true, result };
       } catch (error) {
         lastError = error;
@@ -535,6 +572,65 @@ export class AccountLease {
       : [...candidates.filter((account) => this.hasHeadroom(account, requestedModel)), ...spent];
   }
 
+  /**
+   * Put the account a conversation has been using first, while it still can
+   * serve the model and has quota left for it.
+   *
+   * The upstream caches a conversation's prompt on the account it runs on, so
+   * moving one partway pays for its whole history again. And conversations
+   * running side by side — several chats, or Claude Code and its subagents —
+   * no longer drag each other around: a rate limit in one used to move the
+   * active account, and every other conversation with it.
+   */
+  private preferSession(
+    candidates: AccountMetadata[],
+    requestedModel: string,
+    session: string | undefined,
+  ): AccountMetadata[] {
+    const binding = session ? this.sessions.get(session) : undefined;
+    if (!binding) {
+      return candidates;
+    }
+    if (Date.now() - binding.lastUsed > SESSION_TTL_MS) {
+      this.sessions.delete(session!);
+      return candidates;
+    }
+
+    const bound = candidates.find((account) => account.id === binding.accountId);
+    if (!bound || !this.hasHeadroom(bound, requestedModel)) {
+      return candidates;
+    }
+    return [bound, ...candidates.filter((account) => account !== bound)];
+  }
+
+  /** Remember which account served a conversation, renewing its lease. */
+  private bindSession(session: string | undefined, accountId: string): void {
+    if (!session) {
+      return;
+    }
+    this.sessions.delete(session);
+    this.sessions.set(session, { accountId, lastUsed: Date.now() });
+    if (this.sessions.size <= MAX_SESSIONS) {
+      return;
+    }
+
+    const cutoff = Date.now() - SESSION_TTL_MS;
+    for (const [key, binding] of this.sessions) {
+      if (binding.lastUsed < cutoff) {
+        this.sessions.delete(key);
+      }
+    }
+    // Still full of live ones: the map is in order of use, so the first entry
+    // is the one idle the longest.
+    while (this.sessions.size > MAX_SESSIONS) {
+      const oldest = this.sessions.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      this.sessions.delete(oldest.value);
+    }
+  }
+
   /** True when the account can serve the model right now. */
   private isUsable(account: AccountMetadata, requestedModel: string): boolean {
     if (account.needsReauth) {
@@ -572,7 +668,7 @@ export class AccountLease {
     const active = this.accounts.getActive();
     if (active?.id !== account.id) {
       Logger.info(`Switched active account to ${account.email}`);
-      await this.accounts.setActive(account.id);
+      await this.accounts.setActive(account.id, false);
     }
   }
 

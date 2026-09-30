@@ -22,6 +22,21 @@ export class LanguageModelToolCallPart {
   ) {}
 }
 
+export class LanguageModelDataPart {
+  constructor(
+    readonly data: Uint8Array,
+    readonly mimeType: string,
+  ) {}
+}
+
+export class LanguageModelThinkingPart {
+  constructor(
+    readonly value: string,
+    readonly id?: string,
+    readonly metadata?: Record<string, unknown>,
+  ) {}
+}
+
 export class LanguageModelToolResultPart {
   constructor(
     readonly callId: string,

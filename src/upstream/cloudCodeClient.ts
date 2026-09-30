@@ -264,6 +264,21 @@ export class UpstreamError extends Error {
 }
 
 /**
+ * A stream that stopped partway: the upstream went quiet for longer than the
+ * request timeout, or the connection dropped after the response had begun.
+ *
+ * Before this the failure surfaced as a bare "aborted" — nothing to say what
+ * had happened, and nothing a caller could tell apart from a real refusal. As
+ * a 504 it is worth one more attempt when nothing has been shown yet.
+ */
+export class StreamBrokenError extends UpstreamError {
+  constructor(message: string) {
+    super(message, 504, '');
+    this.name = 'StreamBrokenError';
+  }
+}
+
+/**
  * 403 bodies that name the account, not the request.
  *
  * The endpoints answer with 403 both when they dislike `x-goog-user-project`
@@ -301,29 +316,58 @@ export class CloudCodeClient {
    */
   async streamGenerate(params: GenerateParams): Promise<AsyncGenerator<GeminiResponse>> {
     const response = await this.send(':streamGenerateContent?alt=sse', params);
+    const stream = response.stream;
+    const idleMs = Config.requestTimeoutMs();
 
     async function* iterate(): AsyncGenerator<GeminiResponse> {
-      for await (const event of parseSse(response.stream)) {
-        const data = event.data.trim();
-        if (data === '' || data === '[DONE]') {
-          continue;
+      // The socket timeout only notices silence on the wire; a connection that
+      // keeps trickling bytes without an event in them never trips it. This
+      // one counts events, which are what the caller is waiting for.
+      let timer: NodeJS.Timeout | undefined;
+      const watch = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          stream.destroy(
+            new StreamBrokenError(
+              `Antigravity sent nothing for ${Math.round(idleMs / 1000)}s, so the stream was dropped.`,
+            ),
+          );
+        }, idleMs);
+      };
+
+      watch();
+      try {
+        for await (const event of parseSse(stream)) {
+          watch();
+          const data = event.data.trim();
+          if (data === '' || data === '[DONE]') {
+            continue;
+          }
+          const payload = parseJson(data);
+          if (!payload) {
+            Logger.warn(`Skipping unparsable upstream chunk: ${data.slice(0, 200)}`);
+            continue;
+          }
+          // The upstream accepts the request, opens the stream, and only then
+          // reports a rate limit or an outage — as a chunk carrying `error`
+          // instead of candidates. Yielding it as if it were a response left the
+          // caller with a stream that produced nothing and blamed no one; thrown
+          // here, it goes through the same classification as a refusal on the
+          // response headers, so the account can be rotated or backed off.
+          const failure = inStreamError(payload);
+          if (failure) {
+            throw failure;
+          }
+          yield (payload.response ?? payload) as GeminiResponse;
         }
-        const payload = parseJson(data);
-        if (!payload) {
-          Logger.warn(`Skipping unparsable upstream chunk: ${data.slice(0, 200)}`);
-          continue;
+      } catch (error) {
+        if (error instanceof UpstreamError || params.signal?.aborted) {
+          throw error;
         }
-        // The upstream accepts the request, opens the stream, and only then
-        // reports a rate limit or an outage — as a chunk carrying `error`
-        // instead of candidates. Yielding it as if it were a response left the
-        // caller with a stream that produced nothing and blamed no one; thrown
-        // here, it goes through the same classification as a refusal on the
-        // response headers, so the account can be rotated or backed off.
-        const failure = inStreamError(payload);
-        if (failure) {
-          throw failure;
-        }
-        yield (payload.response ?? payload) as GeminiResponse;
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new StreamBrokenError(`Antigravity's stream broke off (${reason}).`);
+      } finally {
+        clearTimeout(timer);
       }
     }
 

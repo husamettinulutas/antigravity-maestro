@@ -66,7 +66,14 @@ class SignatureStore {
     }
     // Kept rather than deleted: the conversation may well go back to the
     // family that minted it, and then the signature is wanted again.
-    return entry.family === signatureFamilyOf(model) ? entry.signature : undefined;
+    if (entry.family !== signatureFamilyOf(model)) {
+      return undefined;
+    }
+    // A signature in use is renewed. The clock measures idleness, not age: an
+    // agent session past its first hour still replays its first tool calls,
+    // and losing them turned those calls into retold text mid-session.
+    entry.at = Date.now();
+    return entry.signature;
   }
 
   /** Signature for a tool call, so replaying it keeps the upstream happy. */

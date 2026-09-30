@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'http';
+import { StringDecoder } from 'string_decoder';
 
 export interface SseEvent {
   event?: string;
@@ -9,11 +10,18 @@ export interface SseEvent {
  * Parse a text/event-stream body into events. Chunk boundaries never split an
  * event: incomplete tail data stays in the buffer until the next chunk arrives.
  */
-export async function* parseSse(stream: IncomingMessage): AsyncGenerator<SseEvent> {
+export async function* parseSse(
+  stream: IncomingMessage | AsyncIterable<Buffer>,
+): AsyncGenerator<SseEvent> {
   let buffer = '';
+  // Chunks are decoded as one stream: a character whose bytes straddle two
+  // chunks — any Turkish letter, or a tool call's arguments — decoded chunk by
+  // chunk turned into two replacement characters, and silently so, since the
+  // JSON around it still parsed.
+  const decoder = new StringDecoder('utf8');
 
   for await (const chunk of stream) {
-    buffer += chunk.toString('utf-8');
+    buffer += typeof chunk === 'string' ? chunk : decoder.write(chunk);
 
     for (;;) {
       const separator = findSeparator(buffer);
@@ -29,7 +37,7 @@ export async function* parseSse(stream: IncomingMessage): AsyncGenerator<SseEven
     }
   }
 
-  const trailing = parseBlock(buffer);
+  const trailing = parseBlock(buffer + decoder.end());
   if (trailing) {
     yield trailing;
   }

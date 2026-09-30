@@ -21,6 +21,13 @@ export class AccountManager implements vscode.Disposable {
   /** Fires whenever accounts, the active account, or quota data change. */
   readonly onDidChange = this.onDidChangeEmitter.event;
 
+  private readonly onDidChooseActiveEmitter = new vscode.EventEmitter<string>();
+  /**
+   * Fires when the user picks the active account — never when rotation moves
+   * it. A choice made by hand outranks the account a conversation was on.
+   */
+  readonly onDidChooseActive = this.onDidChooseActiveEmitter.event;
+
   private readonly accessTokens = new Map<string, AccessToken>();
   private readonly inFlightRefresh = new Map<string, Promise<string>>();
   private autoRefreshTimer: NodeJS.Timeout | undefined;
@@ -58,9 +65,13 @@ export class AccountManager implements vscode.Disposable {
     this.onDidChangeEmitter.fire();
   }
 
-  async setActive(accountId: string): Promise<void> {
+  /** Make `accountId` the active account; `byUser` is false when rotation moved it. */
+  async setActive(accountId: string, byUser = true): Promise<void> {
     await this.store.setActiveId(accountId);
     this.onDidChangeEmitter.fire();
+    if (byUser) {
+      this.onDidChooseActiveEmitter.fire(accountId);
+    }
   }
 
   // ── Sign-in ────────────────────────────────────────────────────────────────
@@ -298,5 +309,6 @@ export class AccountManager implements vscode.Disposable {
   dispose(): void {
     this.stopAutoRefresh();
     this.onDidChangeEmitter.dispose();
+    this.onDidChooseActiveEmitter.dispose();
   }
 }

@@ -388,3 +388,93 @@ test('lease: accounts Google refused are counted apart from rate limits', async 
     },
   );
 });
+
+// ── Conversations keep their account ──────────────────────────────────────────
+
+/** A lease over accounts whose active one really moves, and says who moved it. */
+function conversationLease(emails: string[]) {
+  const list = emails.map((email, index) => ({ id: `a${index}`, email }));
+  let active = list[0];
+  const promoted: string[] = [];
+  const chosen: ((accountId: string) => void)[] = [];
+  const accounts = {
+    list: () => list,
+    getActive: () => active,
+    get: (id: string) => list.find((account) => account.id === id),
+    getAccessToken: async () => 'token',
+    setActive: async (id: string, byUser = true) => {
+      active = list.find((account) => account.id === id)!;
+      if (byUser) {
+        chosen.forEach((listener) => listener(id));
+      } else {
+        promoted.push(id);
+      }
+    },
+    onDidChooseActive: (listener: (accountId: string) => void) => {
+      chosen.push(listener);
+      return { dispose: () => undefined };
+    },
+  };
+  const subject = new AccountLease(accounts as any, { resolve: () => MODEL } as any, {
+    recordUsage: async () => undefined,
+  } as any);
+
+  const tried: string[] = [];
+  /** One request from `session`, refused with a rate limit by `refusing`. */
+  const serve = (session: string, refusing?: string) =>
+    subject.run(
+      'claude-opus-4-6-thinking',
+      async (context: { email: string }) => {
+        tried.push(`${session}:${context.email}`);
+        if (context.email === refusing) {
+          throw rateLimited();
+        }
+        return 'ok';
+      },
+      undefined,
+      session,
+    );
+  return { subject, accounts, promoted, tried, serve };
+}
+
+test('lease: a conversation stays on its account while the active one moves', async () => {
+  maxWait(0);
+  const { subject, accounts, promoted, tried, serve } = conversationLease([
+    'a@example.com',
+    'b@example.com',
+  ]);
+
+  // a refuses, so the first conversation lands on b.
+  await serve('s1', 'a@example.com');
+  expireCooldown(subject, 'a0', MODEL.id);
+  // Another conversation's rotation moves the active account back to a.
+  await accounts.setActive('a0', false);
+  promoted.length = 0;
+
+  await serve('s1');
+  await serve('s2');
+
+  assert.deepEqual(tried, [
+    's1:a@example.com',
+    's1:b@example.com',
+    // The upstream holds this conversation's prompt cache on b.
+    's1:b@example.com',
+    // A new conversation starts where the active account is.
+    's2:a@example.com',
+  ]);
+  // Serving a conversation from its own account is not a rotation: promoting
+  // it would flip the active account between conversations on every request.
+  assert.deepEqual(promoted, []);
+});
+
+test('lease: an account picked by hand releases every conversation', async () => {
+  maxWait(0);
+  const { subject, accounts, tried, serve } = conversationLease(['a@example.com', 'b@example.com']);
+
+  await serve('s1', 'a@example.com');
+  expireCooldown(subject, 'a0', MODEL.id);
+  await accounts.setActive('a0');
+  await serve('s1');
+
+  assert.equal(tried.at(-1), 's1:a@example.com');
+});

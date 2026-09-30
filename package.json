@@ -2,7 +2,7 @@
   "name": "antigravity-maestro",
   "displayName": "Antigravity Maestro",
   "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "publisher": "husamettinulutas",
   "author": {
     "name": "Hüsamettin Ulutaş",
@@ -244,7 +244,7 @@
           "default": 120,
           "minimum": 10,
           "maximum": 600,
-          "description": "Maximum time to wait for an upstream response before timing out."
+          "description": "Maximum time to wait for an upstream response, or for the next part of a streaming one, before giving up on it. A stream that goes quiet before anything was shown is asked once more."
         },
         "antigravityMaestro.upstreamProxyUrl": {
           "type": "string",

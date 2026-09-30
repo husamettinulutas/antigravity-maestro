@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { toGeminiRequest } from '../protocol/anthropic/request';
 import { AnthropicStreamMapper } from '../protocol/anthropic/stream';
-import { responsesToGemini } from '../protocol/openai/request';
+import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { sanitizeToolSchema } from '../protocol/schema';
+import { signatureStore } from '../protocol/signatureStore';
 import { applyGenerationConstraints } from '../upstream/constraints';
 import { parseSse } from '../utils/sse';
 
@@ -365,4 +366,125 @@ test('SSE parsing survives events split across chunks', async () => {
   }
 
   assert.deepEqual(seen, ['{"a":1}', '{"b":2}', '[DONE]']);
+});
+
+// ── Parallel tool calls on the thinking Gemini models ─────────────────────────
+//
+// Gemini signs only the first call of a parallel batch and checks only that
+// one; every call after it used to be retold as text in each later turn.
+
+const THINKING_GEMINI = 'gemini-3-pro-high';
+
+function callIds(parts: any[]): (string | undefined)[] {
+  return parts.map((part) => part.functionCall?.id ?? part.functionResponse?.id);
+}
+
+test('responses request: parallel calls after the first keep their tool shape', () => {
+  signatureStore.rememberToolCall('call_r1', 'signature-for-the-step', THINKING_GEMINI);
+
+  const request = responsesToGemini(
+    {
+      model: THINKING_GEMINI,
+      input: [
+        { type: 'message', role: 'user', content: 'read both' },
+        { type: 'function_call', name: 'read', arguments: '{"path":"a"}', call_id: 'call_r1' },
+        { type: 'function_call', name: 'read', arguments: '{"path":"b"}', call_id: 'call_r2' },
+        { type: 'function_call_output', call_id: 'call_r1', output: 'A' },
+        { type: 'function_call_output', call_id: 'call_r2', output: 'B' },
+      ],
+    } as any,
+    THINKING_GEMINI,
+    true,
+  );
+
+  assert.deepEqual(callIds(request.contents[1].parts), ['call_r1', 'call_r2']);
+  assert.equal(request.contents[1].parts[0].thoughtSignature, 'signature-for-the-step');
+  assert.deepEqual(callIds(request.contents[2].parts), ['call_r1', 'call_r2']);
+});
+
+test('chat request: parallel calls after the first keep their tool shape', () => {
+  signatureStore.rememberToolCall('call_c1', 'signature-for-the-step', THINKING_GEMINI);
+
+  const request = chatToGemini(
+    {
+      model: THINKING_GEMINI,
+      messages: [
+        { role: 'user', content: 'read both' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            { id: 'call_c1', type: 'function', function: { name: 'read', arguments: '{"path":"a"}' } },
+            { id: 'call_c2', type: 'function', function: { name: 'read', arguments: '{"path":"b"}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_c1', content: 'A' },
+        { role: 'tool', tool_call_id: 'call_c2', content: 'B' },
+      ],
+    } as any,
+    THINKING_GEMINI,
+    true,
+  );
+
+  assert.deepEqual(callIds(request.contents[1].parts), ['call_c1', 'call_c2']);
+  assert.deepEqual(callIds(request.contents[2].parts), ['call_c1', 'call_c2']);
+});
+
+test('chat request: a step whose first call lost its signature is retold whole', () => {
+  const request = chatToGemini(
+    {
+      model: THINKING_GEMINI,
+      messages: [
+        { role: 'user', content: 'read both' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            { id: 'call_lost1', type: 'function', function: { name: 'read', arguments: '{}' } },
+            { id: 'call_lost2', type: 'function', function: { name: 'read', arguments: '{}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'call_lost1', content: 'A' },
+        { role: 'tool', tool_call_id: 'call_lost2', content: 'B' },
+      ],
+    } as any,
+    THINKING_GEMINI,
+    true,
+  );
+
+  assert.deepEqual(callIds(request.contents[1].parts), [undefined, undefined]);
+  assert.match(request.contents[1].parts[1].text ?? '', /^\[tool call\] read/);
+});
+
+test('anthropic request: parallel calls after the first keep their tool shape', () => {
+  signatureStore.rememberToolCall('toolu_a1', 'signature-for-the-step', THINKING_GEMINI);
+
+  const { request } = toGeminiRequest(
+    {
+      model: THINKING_GEMINI,
+      max_tokens: 1024,
+      messages: [
+        { role: 'user', content: 'read both' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_a1', name: 'read', input: { path: 'a' } },
+            { type: 'tool_use', id: 'toolu_a2', name: 'read', input: { path: 'b' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_a1', content: 'A' },
+            { type: 'tool_result', tool_use_id: 'toolu_a2', content: 'B' },
+          ],
+        },
+      ],
+    } as any,
+    THINKING_GEMINI,
+    true,
+  );
+
+  assert.deepEqual(callIds(request.contents[1].parts), ['toolu_a1', 'toolu_a2']);
+  assert.deepEqual(callIds(request.contents[2].parts), ['toolu_a1', 'toolu_a2']);
 });

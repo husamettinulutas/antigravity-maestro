@@ -249,7 +249,14 @@ function unsignedToolUseIds(
     }
     // Mirrors the walk in `convertAssistantContent`: a tool call falls back to
     // the signature of the thinking block ahead of it in the same turn.
+    //
+    // The first call decides for the whole turn. Gemini signs only the first
+    // call of a step — the rest of a parallel batch never carry one — and
+    // checks only that first call, so judging each call on its own retold
+    // every parallel call after the first as text.
     let pendingSignature: string | undefined;
+    let signed = false;
+    const ids: string[] = [];
     for (const block of asBlocks(message.content)) {
       if (block.type === 'thinking') {
         const signature = (block as any).signature as string | undefined;
@@ -260,9 +267,13 @@ function unsignedToolUseIds(
         continue;
       }
       const toolUse = block as AnthropicToolUseBlock;
-      if (!signatureStore.forToolCall(toolUse.id, model) && !pendingSignature) {
-        unsigned.add(toolUse.id);
+      if (ids.length === 0) {
+        signed = !!signatureStore.forToolCall(toolUse.id, model) || !!pendingSignature;
       }
+      ids.push(toolUse.id);
+    }
+    if (!signed) {
+      ids.forEach((id) => unsigned.add(id));
     }
   }
   return unsigned;

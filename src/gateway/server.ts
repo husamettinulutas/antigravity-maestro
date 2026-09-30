@@ -9,12 +9,15 @@ import { ChatStreamMapper, toChatCompletion } from '../protocol/openai/chatStrea
 import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/responsesStream';
 import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
-import { CloudCodeClient, UpstreamError } from '../upstream/cloudCodeClient';
+import { CloudCodeClient, StreamBrokenError, UpstreamError } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints } from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
-  overlongResponse,
+  Silence,
+  describeSilence,
+  describeTail,
+  retryAfter,
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import { Logger } from '../utils/logger';
@@ -25,6 +28,18 @@ const MAX_BODY_BYTES = 64 * 1024 * 1024;
 const FORBIDDEN_RETRY_AFTER_SECONDS = 60;
 /** Rough characters-per-token ratio for count_tokens. */
 const CHARS_PER_TOKEN = 3.7;
+/**
+ * The text an Anthropic answer carries when the model ended its turn with
+ * nothing to say. Anthropic clients expect at least one content block, and
+ * whitespace alone is refused when the message is sent back on the next turn.
+ */
+const ANTHROPIC_PLACEHOLDER = '.';
+
+const SSE_HEADERS = {
+  'content-type': 'text/event-stream; charset=utf-8',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+};
 
 /** Minimal contract the protocol stream mappers satisfy. */
 interface StreamMapper {
@@ -193,32 +208,29 @@ export class GatewayServer {
         );
 
         if (body.stream) {
-          await this.pipeStream(res, request, context, abort.signal, () => {
-            const mapper = new AnthropicStreamMapper(context.model.id);
-            return {
-              start: () => mapper.start(),
-              push: (chunk) => mapper.push(chunk),
-              finish: () => mapper.finish(),
-              error: (message) => mapper.error(message),
-              usage: () => mapper.usageMetadata(),
-            };
-          });
+          await this.pipeStream(
+            res,
+            request,
+            context,
+            abort.signal,
+            () => {
+              const mapper = new AnthropicStreamMapper(context.model.id);
+              return {
+                start: () => mapper.start(),
+                push: (chunk) => mapper.push(chunk),
+                finish: () => mapper.finish(),
+                error: (message) => mapper.error(message),
+                usage: () => mapper.usageMetadata(),
+              };
+            },
+            ANTHROPIC_PLACEHOLDER,
+          );
           return;
         }
 
-        const response = await this.deps.client.generate({
-          model: context.model.id,
-          request,
-          accessToken: context.accessToken,
-          projectId: context.projectId,
-          accountId: context.accountId,
-      accountEmail: context.email,
-          signal: abort.signal,
-        });
-        await this.deps.lease.recordUsage(context, response.usageMetadata);
-        this.rejectEmpty(response, context);
+        const response = await this.generateTurn(request, context, abort.signal, ANTHROPIC_PLACEHOLDER);
         sendJson(res, 200, toAnthropicResponse(response, context.model.id));
-      }, abort.signal);
+      }, abort.signal, sessionOf(req, body));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -300,19 +312,9 @@ export class GatewayServer {
           return;
         }
 
-        const response = await this.deps.client.generate({
-          model: context.model.id,
-          request,
-          accessToken: context.accessToken,
-          projectId: context.projectId,
-          accountId: context.accountId,
-      accountEmail: context.email,
-          signal: abort.signal,
-        });
-        await this.deps.lease.recordUsage(context, response.usageMetadata);
-        this.rejectEmpty(response, context);
+        const response = await this.generateTurn(request, context, abort.signal);
         sendJson(res, 200, toResponsesResponse(response, context.model.id));
-      }, abort.signal);
+      }, abort.signal, sessionOf(req, body));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -352,19 +354,9 @@ export class GatewayServer {
           return;
         }
 
-        const response = await this.deps.client.generate({
-          model: context.model.id,
-          request,
-          accessToken: context.accessToken,
-          projectId: context.projectId,
-          accountId: context.accountId,
-      accountEmail: context.email,
-          signal: abort.signal,
-        });
-        await this.deps.lease.recordUsage(context, response.usageMetadata);
-        this.rejectEmpty(response, context);
+        const response = await this.generateTurn(request, context, abort.signal);
         sendJson(res, 200, toChatCompletion(response, context.model.id));
-      }, abort.signal);
+      }, abort.signal, sessionOf(req, body));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -390,23 +382,74 @@ export class GatewayServer {
   }
 
   /**
-   * Fail a non-streaming answer that came back without content, rather than
-   * handing the client an assistant turn with nothing in it. The usage is
-   * already recorded — the tokens were spent either way.
+   * One non-streaming turn, settling an answer that came back empty.
+   *
+   * The same rules as `pipeStream`: a model that ended its turn with nothing
+   * to say is nudged once and then answered with that nothing — as a finished
+   * turn, never as a retryable failure, because Claude Code resends a 5xx up
+   * to ten times and every resend is billed for the same decision. Usage is
+   * recorded for every attempt; the tokens were spent either way.
    */
-  private rejectEmpty(response: GeminiResponse, context: LeaseContext): void {
-    const watch = new EmptyResponseWatch();
-    watch.note(response);
-    const empty = watch.failure();
-    if (empty) {
-      const tooLong = overlongResponse(response.usageMetadata, context.model);
-      if (tooLong) {
-        Logger.warn(`Overlong prompt on ${context.model.id}: ${tooLong}`);
-        throw new EmptyResponseError(tooLong, false);
+  private async generateTurn(
+    request: GeminiRequest,
+    context: LeaseContext,
+    signal: AbortSignal,
+    placeholder?: string,
+  ): Promise<GeminiResponse> {
+    let current = request;
+    for (let attempt = 0; ; attempt++) {
+      const response = await this.deps.client.generate({
+        model: context.model.id,
+        request: current,
+        accessToken: context.accessToken,
+        projectId: context.projectId,
+        accountId: context.accountId,
+        accountEmail: context.email,
+        signal,
+      });
+      await this.deps.lease.recordUsage(context, response.usageMetadata);
+
+      const watch = new EmptyResponseWatch();
+      watch.note(response);
+      const silence = watch.silence(context.model);
+      if (!silence) {
+        return response;
       }
-      Logger.warn(`Empty response from ${context.email} on ${context.model.id}: ${empty.message}`);
-      throw empty;
+
+      const again = this.nextAttempt(silence, current, context, attempt, signal);
+      if (again) {
+        current = again;
+        continue;
+      }
+      if (silence.kind === 'finished') {
+        return placeholder && !silence.thought ? withText(response, placeholder) : response;
+      }
+      throw new EmptyResponseError(silence.message, silence.kind === 'cutOff');
     }
+  }
+
+  /**
+   * Log a silence and return the request to try next, or `undefined` when the
+   * turn has to be settled as it stands.
+   */
+  private nextAttempt(
+    silence: Silence,
+    request: GeminiRequest,
+    context: LeaseContext,
+    attempt: number,
+    signal: AbortSignal,
+  ): GeminiRequest | undefined {
+    Logger.warn(
+      `${context.email} on ${context.model.id}: ${describeSilence(silence)}; ` +
+        `the request ended with ${describeTail(request)}`,
+    );
+    const again = attempt === 0 && !signal.aborted ? retryAfter(silence, request) : undefined;
+    if (again) {
+      Logger.info(
+        again === request ? 'Asking once more, unchanged' : 'Asking once more, with a nudge to continue',
+      );
+    }
+    return again;
   }
 
   // ── Streaming ──────────────────────────────────────────────────────────────
@@ -422,6 +465,12 @@ export class GatewayServer {
    * to succeeding. Holding them back keeps that failure an ordinary one: it
    * propagates out of here, the lease tries the next account, and only a
    * refusal every account shares reaches the client.
+   *
+   * A stream that closed with no answer is settled here, before anything is
+   * sent. A model that ended its turn with nothing to say is nudged once, then
+   * its turn ends as it chose — returning that as a retryable 502 had Claude
+   * Code resend it up to ten times, each attempt billed, each as silent as the
+   * first. Only a stream cut off before it finished is a retryable failure.
    */
   private async pipeStream(
     res: http.ServerResponse,
@@ -429,40 +478,52 @@ export class GatewayServer {
     context: LeaseContext,
     signal: AbortSignal,
     createMapper: () => StreamMapper,
+    placeholder?: string,
   ): Promise<void> {
+    let current = request;
     for (let attempt = 0; ; attempt++) {
       const mapper = createMapper();
+      let silence: Silence | undefined;
       try {
-        await this.pumpOnce(res, request, context, signal, mapper);
-        return;
+        silence = await this.pumpOnce(res, current, context, signal, mapper);
       } catch (error) {
-        // An empty stream is worth one more ask on the same account — nothing
-        // has reached the client, so the second answer cannot duplicate the
-        // first. A deliberate silence (blocked prompt, safety stop) is not.
-        const worthRetrying =
-          attempt === 0 &&
-          error instanceof EmptyResponseError &&
-          error.retryable &&
-          !res.headersSent &&
-          !signal.aborted;
-        if (!worthRetrying) {
-          throw error;
+        // A stream that broke off before anything was sent is asked again
+        // once, unchanged; after that the client hears about it as a 504.
+        if (attempt === 0 && error instanceof StreamBrokenError && !res.headersSent && !signal.aborted) {
+          Logger.warn(`${context.email} on ${context.model.id}: ${error.message} Asking once more.`);
+          continue;
         }
-        Logger.warn(
-          `${context.email} returned an empty response on ${context.model.id}; asking once more`,
-        );
+        throw error;
       }
+      if (!silence || signal.aborted) {
+        return;
+      }
+
+      const again = this.nextAttempt(silence, current, context, attempt, signal);
+      if (again) {
+        current = again;
+        continue;
+      }
+      if (silence.kind === 'finished') {
+        endQuietly(res, mapper, placeholder);
+        return;
+      }
+      throw new EmptyResponseError(silence.message, silence.kind === 'cutOff');
     }
   }
 
-  /** One upstream stream, mapped to the client's wire format. */
+  /**
+   * One upstream stream, mapped to the client's wire format. Returns why it
+   * carried no answer when nothing has been sent yet — the response is then
+   * still the caller's to settle — and `undefined` once it is complete.
+   */
   private async pumpOnce(
     res: http.ServerResponse,
     request: GeminiRequest,
     context: LeaseContext,
     signal: AbortSignal,
     mapper: StreamMapper,
-  ): Promise<void> {
+  ): Promise<Silence | undefined> {
     const stream = await this.deps.client.streamGenerate({
       model: context.model.id,
       request,
@@ -482,11 +543,7 @@ export class GatewayServer {
       }
       if (!opened) {
         opened = true;
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive',
-        });
+        res.writeHead(200, SSE_HEADERS);
         const opening = mapper.start?.();
         if (opening) {
           res.write(opening);
@@ -495,50 +552,43 @@ export class GatewayServer {
       res.write(events);
     };
 
-    let usageRecorded = false;
+    let silence: Silence | undefined;
     try {
       for await (const chunk of stream) {
         watch.note(chunk);
         write(mapper.push(chunk));
       }
 
-      const empty = watch.failure();
-      if (empty) {
-        // Report it before the usage is recorded and the response committed,
-        // so a retry or another account can still serve this turn.
-        const usage = mapper.usage();
-        // An overlong prompt is the one silence with a known cause: the
-        // upstream bills the request and answers with nothing, so asking again
-        // — here or on another account — only pays for the same silence.
-        const tooLong = overlongResponse(usage, context.model);
+      silence = watch.silence(context.model);
+      if (silence && opened) {
+        // Reasoning went out but no answer followed. It cannot be taken back,
+        // so the turn closes the way the upstream closed it.
         Logger.warn(
-          tooLong
-            ? `Overlong prompt on ${context.model.id}: ${tooLong}`
-            : `Empty response from ${context.email} on ${context.model.id}: ${empty.message}`,
+          `${context.email} on ${context.model.id}: ${describeSilence(silence)} after output was sent`,
         );
-        await this.deps.lease.recordUsage(context, usage);
-        usageRecorded = true;
-        throw tooLong ? new EmptyResponseError(tooLong, false) : empty;
+        silence = undefined;
       }
-
-      write(mapper.finish());
+      if (!silence) {
+        write(mapper.finish());
+      }
     } catch (error) {
+      await this.deps.lease.recordUsage(context, mapper.usage());
       if (!opened) {
         // Nothing has been sent: let the caller decide, with the full range of
         // responses — another account, a retry, or a proper status code.
-        if (!usageRecorded) {
-          await this.deps.lease.recordUsage(context, mapper.usage());
-        }
         throw error;
       }
       Logger.error('Stream failed mid-response', error);
-      res.write(mapper.error(describe(error)));
+      res.end(mapper.error(describe(error)));
+      return undefined;
     }
 
-    if (!usageRecorded) {
-      await this.deps.lease.recordUsage(context, mapper.usage());
+    await this.deps.lease.recordUsage(context, mapper.usage());
+    if (silence) {
+      return silence;
     }
     res.end();
+    return undefined;
   }
 
   // ── Errors ─────────────────────────────────────────────────────────────────
@@ -583,13 +633,14 @@ export class GatewayServer {
     }
 
     if (error instanceof EmptyResponseError) {
-      // Two different answers. A stream that arrived empty is a blip worth one
-      // more attempt, so it goes back as a retryable 502 with the reason in
-      // it. A prompt the upstream refused to answer would come back empty
-      // however often it is sent, and the client is told so outright —
+      // Two different answers. A stream cut off before it finished is a blip
+      // worth another attempt, so it goes back as a retryable 502 with the
+      // reason in it. A prompt the upstream refused to answer would come back
+      // empty however often it is sent, and the client is told so outright —
       // without that, the agents retry until they run out and print their own
       // "no response was returned", which is where this whole failure used to
-      // end up with nothing to explain it.
+      // end up with nothing to explain it. (A model that simply had nothing to
+      // say never gets here: its turn is answered as finished.)
       Logger.warn(`Empty upstream response: ${error.message}`);
       if (error.retryable) {
         sendJson(res, 502, errorBody('api_error', error.message), retryAfterHeader(1));
@@ -604,6 +655,59 @@ export class GatewayServer {
     Logger.error('Gateway request failed', error);
     sendJson(res, 500, errorBody('api_error', describe(error)));
   }
+}
+
+// ── Conversations ─────────────────────────────────────────────────────────────
+
+/**
+ * The conversation a request belongs to, when the client names one, so the
+ * lease can keep it on one account. Claude Code sends its session both as a
+ * header and inside `metadata.user_id`; Codex sends its conversation id as a
+ * header and as the prompt cache key.
+ */
+function sessionOf(req: http.IncomingMessage, body: unknown): string | undefined {
+  const fields = body as { metadata?: { user_id?: unknown }; prompt_cache_key?: unknown } | undefined;
+  const key = [
+    header(req, 'x-claude-code-session-id'),
+    header(req, 'session_id'),
+    header(req, 'conversation_id'),
+    header(req, 'x-session-id'),
+    fields?.prompt_cache_key,
+    fields?.metadata?.user_id,
+  ].find((value): value is string => typeof value === 'string' && value.trim() !== '');
+  return key ? `gateway:${key}` : undefined;
+}
+
+// ── Settling a silent turn ────────────────────────────────────────────────────
+
+/**
+ * Answer a turn the model ended with nothing to say, as the finished turn it
+ * is: the mapper has seen the upstream's finish reason and usage, so the close
+ * it writes is the one a spoken turn would have had. `placeholder` is for the
+ * protocols that expect at least one content block.
+ */
+function endQuietly(
+  res: http.ServerResponse,
+  mapper: StreamMapper,
+  placeholder: string | undefined,
+): void {
+  let events = mapper.start?.() ?? '';
+  if (placeholder) {
+    events += mapper.push({ candidates: [{ content: { role: 'model', parts: [{ text: placeholder }] } }] });
+  }
+  events += mapper.finish();
+  res.writeHead(200, SSE_HEADERS);
+  res.end(events);
+}
+
+/** `response` with `text` added to its answer. */
+function withText(response: GeminiResponse, text: string): GeminiResponse {
+  const [candidate, ...rest] = response.candidates ?? [{}];
+  const content = candidate.content ?? { role: 'model' as const, parts: [] };
+  return {
+    ...response,
+    candidates: [{ ...candidate, content: { ...content, parts: [...content.parts, { text }] } }, ...rest],
+  };
 }
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────

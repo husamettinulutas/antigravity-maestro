@@ -1,5 +1,75 @@
 # Changelog
 
+## 1.0.16
+
+- **An autopilot session ends cleanly instead of failing on its last
+  request.** Every autopilot run in Copilot Chat ended with "Antigravity
+  returned an empty response (finish reason: STOP)", three "Autopilot
+  recovered from a request error" lines, and "Sorry, your request failed".
+  Autopilot always sends one more request after the model calls
+  `task_complete`, carrying only that tool's result — the model's own
+  summary, which the tool tells it not to restate — so the model rightly
+  answers with nothing. That nothing was treated as a fault: asked again
+  unchanged, then thrown, and Copilot resends a failed request three times.
+  Eight full-context requests were billed for a task that was already done.
+  That request is now answered without calling the model at all.
+
+- **A model that ends its turn with nothing to say has finished, not
+  failed.** Anthropic documents the empty `end_turn` for Claude, and Gemini 3
+  emits empty wrap-up turns on purpose; sending the same request again only
+  gets the same decision. The model is now nudged once with a continuation
+  prompt — only the upstream sees it, never the conversation — and if it
+  still has nothing to add, the turn ends as a success. Only a stream cut off
+  before it finished is still a retryable failure. A refusal (safety stop,
+  token cap, an overlong prompt) is explained in the answer instead of thrown,
+  since Copilot retried every failure regardless of its cause. A response of
+  reasoning alone, which Copilot reported as "Sorry, no response was
+  returned", now counts as a finished turn too.
+
+- The gateway follows the same rules. Claude Code got a retryable 502 for a
+  silent turn and resent it up to ten times; it now gets a finished message
+  (`.` with `end_turn`), and OpenAI clients get an empty completion.
+
+- **Parallel tool calls keep their shape on the thinking Gemini models.**
+  Gemini signs only the first call of a parallel batch, and every call after
+  it was retold as text in each later turn. The signature is now judged per
+  step, as Gemini checks it; a signature in use no longer expires after an
+  hour; and Copilot's `task_complete` bookkeeping and the model's own earlier
+  reasoning are no longer replayed to it as things it said.
+
+- Turkish letters and other multi-byte characters split across network
+  chunks arrived as `��` — in answers and in the arguments of file edits.
+
+- **Copilot Chat now knows how big a conversation really is.** It sizes every
+  prompt through the extension and compacts the conversation once the budget
+  runs out, but two things kept it guessing low. The upstream's own token
+  count was never passed on, so the context indicator read empty and
+  background compaction ran on an estimate; it is now reported with every
+  answer. And the estimate counted tool-call arguments as nothing, though
+  every file an edit tool writes travels in them; they count now, and so do
+  images, at what the models charge per image. Compaction comes before a
+  prompt outgrows the model — past that point the upstream bills the request
+  and answers with nothing.
+
+- **A conversation stays on the account it started on.** The upstream caches
+  a conversation's prompt on the account serving it, and moving a
+  conversation partway pays for its whole history again. Copilot Chat, Claude
+  Code and Codex all name the conversation a request belongs to, and its
+  requests now stay on one account while that account can serve them — so
+  parallel chats, or Claude Code and its subagents, no longer drag each other
+  across accounts when one of them hits a rate limit. Picking an account by
+  hand still moves every conversation to it.
+
+- **A stream that goes quiet is dropped, named, and asked again.** An
+  upstream that stopped sending partway ended the turn with a bare
+  "aborted"; a connection that kept trickling bytes without an event in them
+  was never timed out at all. The request timeout now also bounds the silence
+  between two parts of a stream, and a stream that breaks off before anything
+  was shown is asked once more.
+
+- The gateway's OpenAI surfaces had the same parallel tool call problem as
+  Copilot Chat on the thinking Gemini models, and have the same fix.
+
 ## 1.0.15
 
 - **The picker says how much context a model has, before you switch to it.**
