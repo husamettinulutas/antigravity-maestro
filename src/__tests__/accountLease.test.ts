@@ -296,6 +296,26 @@ test('lease: a run of identical rate limits stops the rotation, not just the acc
   assert.ok(subject.cooldownSeconds('a4', MODEL.id) > 0);
 });
 
+test('lease: bare rate limits with no wait never leave an account untried', async () => {
+  maxWait(0);
+  const subject = lease(['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
+  const tried: string[] = [];
+
+  // A 429 with no retry delay does not say whose limit it is. Read as the
+  // client's, three of them left the fourth account untried — the one that
+  // could have answered.
+  const result = await subject.run('claude-opus-4-6-thinking', async (context: { email: string }) => {
+    tried.push(context.email);
+    if (context.email !== 'd@example.com') {
+      throw new UpstreamError('HTTP 429: Resource has been exhausted (e.g. check quota).', 429, '');
+    }
+    return 'served';
+  });
+
+  assert.equal(result, 'served');
+  assert.deepEqual(tried, ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);
+});
+
 test('lease: rate limits with different waits are still rotated past', async () => {
   maxWait(0);
   const subject = lease(['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com']);

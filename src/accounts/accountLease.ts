@@ -721,10 +721,11 @@ function looksShared(strikes: RateLimitStrike[]): boolean {
   if (recent.some((strike) => strike.modelId !== modelId)) {
     return false;
   }
+  // A bare 429 says nothing about whose limit it is. Three of them in a row
+  // are as likely to be a request the upstream refuses on every account as a
+  // limit on this client — and, read as the latter, they left the remaining
+  // accounts untried and every account reported as cooling down.
   const delays = recent.map((strike) => strike.retryAfterSeconds);
-  if (delays.every((delay) => delay === undefined)) {
-    return true;
-  }
   if (delays.some((delay) => delay === undefined)) {
     return false;
   }

@@ -10,7 +10,7 @@ import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/responsesStream';
 import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
 import { CloudCodeClient, StreamBrokenError, UpstreamError } from '../upstream/cloudCodeClient';
-import { applyGenerationConstraints } from '../upstream/constraints';
+import { applyGenerationConstraints, budgetForEffort } from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
@@ -241,7 +241,7 @@ export class GatewayServer {
    * is honoured where the model allows it, then clamped to the model's limits.
    */
   private prepareAnthropicRequest(body: AnthropicRequest, context: LeaseContext): GeminiRequest {
-    const { request, requestedThinkingBudget } = toGeminiRequest(
+    const { request, requestedThinkingBudget, requestedEffort } = toGeminiRequest(
       body,
       context.model.id,
       context.model.supportsThinking,
@@ -254,7 +254,7 @@ export class GatewayServer {
         thinkingBudget:
           requestedThinkingBudget !== undefined && requestedThinkingBudget >= 0
             ? requestedThinkingBudget
-            : context.model.thinkingBudget,
+            : budgetForEffort(requestedEffort, context.model.id, context.model.thinkingBudget),
       };
     } else {
       delete request.generationConfig.thinkingConfig;

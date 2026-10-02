@@ -30,6 +30,7 @@ const MANAGED_ENV_KEYS = [
   'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
   'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
   'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'CLAUDE_CODE_ATTRIBUTION_HEADER',
 ] as const;
 
 interface ClaudeSettings {
@@ -143,6 +144,10 @@ export class ClaudeCodeIntegration implements AgentIntegration {
     // Claude Code's experimental betas attach Anthropic-only message ids that
     // the gateway cannot honour.
     env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = '1';
+    // The billing line it would otherwise open the system prompt with makes
+    // Gemini Flash refuse the request with a 429 on every account. The gateway
+    // strips it too, for settings applied by an older version.
+    env.CLAUDE_CODE_ATTRIBUTION_HEADER = '0';
 
     if (options.maxInputTokens && options.maxInputTokens > 0) {
       // Claude Code assumes a 200k window; declaring the real one makes

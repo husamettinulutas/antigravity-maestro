@@ -9,6 +9,7 @@ import { sanitizeToolSchema } from '../schema';
 import { signatureFamilyOf, signatureStore } from '../signatureStore';
 import {
   AnthropicContentBlock,
+  AnthropicEffort,
   AnthropicMessage,
   AnthropicRequest,
   AnthropicToolResultBlock,
@@ -19,6 +20,8 @@ export interface AnthropicConversion {
   request: GeminiRequest;
   /** Requested thinking budget, before the model's own limits are applied. */
   requestedThinkingBudget?: number;
+  /** Requested effort, for a client that asks for one instead of a budget. */
+  requestedEffort?: AnthropicEffort;
 }
 
 /**
@@ -95,7 +98,9 @@ export function toGeminiRequest(
   const requestedThinkingBudget =
     anthropic.thinking?.type === 'enabled' ? (anthropic.thinking.budget_tokens ?? -1) : undefined;
 
-  return { request: pruneUndefined(request), requestedThinkingBudget };
+  const requestedEffort = anthropic.output_config?.effort;
+
+  return { request: pruneUndefined(request), requestedThinkingBudget, requestedEffort };
 }
 
 // ── Content conversion ────────────────────────────────────────────────────────
@@ -317,15 +322,38 @@ function flattenToolResult(content: AnthropicToolResultBlock['content']): string
   return text === '' ? '(no output)' : text;
 }
 
+/**
+ * The first line Claude Code puts in its system prompt: a per-build billing
+ * tag, `x-anthropic-billing-header: cc_version=…; cc_entrypoint=…;`.
+ */
+const BILLING_LINE = /^\s*x-anthropic-billing-header:[^\n]*(?:\n+|$)/;
+
+/** The line the Agent SDK opens every agent's system prompt with. */
+const AGENT_SDK_LINE =
+  /^[ \t]*You are a Claude agent, built on Anthropic's Claude Agent SDK\.[ \t]*(?:\n+|$)/gm;
+
+/**
+ * Lines of Claude Code's system prompt that Cloud Code answers with a bare
+ * `429 RESOURCE_EXHAUSTED` on Gemini 3.7/3.8 Flash — no quota detail, on every
+ * account at once — so a request carrying them never gets a reply and, rotated
+ * across the pool, puts every account on cooldown. Neither means anything to
+ * a model other than Claude; the billing tag also changes with every Claude
+ * Code build, which kept the prompt prefix from ever being cached.
+ */
+export function withoutClientTags(text: string): string {
+  return text.replace(BILLING_LINE, '').replace(AGENT_SDK_LINE, '');
+}
+
 function extractSystemText(system: AnthropicRequest['system']): string {
   if (!system) {
     return '';
   }
   if (typeof system === 'string') {
-    return system;
+    return withoutClientTags(system).trim();
   }
   return system
     .map((block) => (block.type === 'text' ? String((block as any).text ?? '') : ''))
+    .map((value) => withoutClientTags(value).trim())
     .filter((value) => value !== '')
     .join('\n\n');
 }

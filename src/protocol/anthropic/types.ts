@@ -55,6 +55,8 @@ export interface AnthropicTool {
   input_schema?: Record<string, unknown>;
 }
 
+export type AnthropicEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface AnthropicRequest {
   model: string;
   messages: AnthropicMessage[];
@@ -67,7 +69,13 @@ export interface AnthropicRequest {
   top_k?: number;
   stop_sequences?: string[];
   stream?: boolean;
-  thinking?: { type: 'enabled' | 'disabled'; budget_tokens?: number };
+  thinking?: {
+    type: 'enabled' | 'disabled' | 'adaptive';
+    budget_tokens?: number;
+    display?: string;
+  };
+  /** How hard the model should work; Claude Code's `--effort`. */
+  output_config?: { effort?: AnthropicEffort; format?: unknown };
   metadata?: { user_id?: string };
 }
 

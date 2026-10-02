@@ -47,6 +47,7 @@ const MODEL_SPECS: Record<string, { maxOutputTokens: number; thinkingBudget: num
   'gemini-3.6-flash-low': { maxOutputTokens: 65536, thinkingBudget: 1000 },
   'gemini-3.6-flash-tiered': { maxOutputTokens: 65536, thinkingBudget: 10000 },
   'gemini-3.7-flash-tiered': { maxOutputTokens: 65536, thinkingBudget: 10000 },
+  'gemini-3.8-flash-tiered': { maxOutputTokens: 65536, thinkingBudget: 10000 },
   // Gemini 3.x Flash and Pro.
   'gemini-3-flash': { maxOutputTokens: 65536, thinkingBudget: 32768 },
   'gemini-3.1-flash-lite': { maxOutputTokens: 65536, thinkingBudget: 0 },

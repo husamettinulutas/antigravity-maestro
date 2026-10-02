@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.0.17
+
+- **Claude Code works on Gemini 3.7/3.8 Flash again instead of "Every
+  account is unavailable for this model".** Claude Code opens its system
+  prompt with an `x-anthropic-billing-header: cc_version=…` line and the
+  sentence "You are a Claude agent, built on Anthropic's Claude Agent SDK.",
+  and Cloud Code answers a request carrying them with a bare 429 "Resource
+  has been exhausted" on every account at once — Copilot, which sends
+  neither, worked on the same accounts. The gateway now drops both before
+  the request goes upstream, and applying the Claude Code integration sets
+  `CLAUDE_CODE_ATTRIBUTION_HEADER=0` so the line is not sent at all. Without
+  the per-build billing tag the prompt prefix can also be cached again.
+- **A 429 with no retry delay no longer stops the rotation.** Three of them
+  in a row were read as a limit on this client, so the remaining accounts
+  were left untried and the whole pool was put on cooldown. Only identical
+  waits Google actually reports count as a shared limit now.
+- **Claude Code's `--effort` sets the thinking budget.** Low and medium
+  effort think less (1k / 4k tokens on Gemini Flash); high, xhigh and max
+  keep the model's full budget. Effort was ignored before, so every request
+  paid for the full budget.
+- The wait in an `ErrorInfo` `quotaResetDelay` is honoured when a 429 has
+  no `RetryInfo`, and every 429 that ends a request logs the start of its
+  body, which is what tells a spent quota from a refused request.
+- `gemini-3.8-flash-tiered` gets the same output and thinking limits as 3.7.
+
 ## 1.0.16
 
 - **An autopilot session ends cleanly instead of failing on its last

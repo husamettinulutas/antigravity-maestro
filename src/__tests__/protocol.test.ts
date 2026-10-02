@@ -5,7 +5,7 @@ import { AnthropicStreamMapper } from '../protocol/anthropic/stream';
 import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { sanitizeToolSchema } from '../protocol/schema';
 import { signatureStore } from '../protocol/signatureStore';
-import { applyGenerationConstraints } from '../upstream/constraints';
+import { applyGenerationConstraints, budgetForEffort } from '../upstream/constraints';
 import { parseSse } from '../utils/sse';
 
 /** Parse the SSE text a mapper produced into {event, data} pairs. */
@@ -487,4 +487,53 @@ test('anthropic request: parallel calls after the first keep their tool shape', 
 
   assert.deepEqual(callIds(request.contents[1].parts), ['toolu_a1', 'toolu_a2']);
   assert.deepEqual(callIds(request.contents[2].parts), ['toolu_a1', 'toolu_a2']);
+});
+
+test('anthropic: Claude Code tags the upstream refuses are dropped from the system prompt', () => {
+  const { request } = toGeminiRequest({
+    model: 'x',
+    max_tokens: 100,
+    system: [
+      { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.280.e6f; cc_entrypoint=claude-vscode;' },
+      { type: 'text', text: "You are a Claude agent, built on Anthropic's Claude Agent SDK." },
+      { type: 'text', text: 'You are an interactive agent.\nMention the Claude Agent SDK when asked.' },
+    ],
+    messages: [{ role: 'user', content: 'selam' }],
+  });
+
+  const text = request.systemInstruction?.parts[0].text;
+  assert.equal(text, 'You are an interactive agent.\nMention the Claude Agent SDK when asked.');
+});
+
+test('anthropic: a string system prompt loses its billing line and keeps the rest', () => {
+  const { request } = toGeminiRequest({
+    model: 'x',
+    max_tokens: 100,
+    system:
+      'x-anthropic-billing-header: cc_version=2.1.280; cc_entrypoint=cli;\n' +
+      "You are a Claude agent, built on Anthropic's Claude Agent SDK.\n\nBe brief.",
+    messages: [{ role: 'user', content: 'selam' }],
+  });
+
+  assert.equal(request.systemInstruction?.parts[0].text, 'Be brief.');
+});
+
+test('anthropic: the effort Claude Code asks for picks the thinking budget', () => {
+  const { requestedEffort, requestedThinkingBudget } = toGeminiRequest({
+    model: 'x',
+    max_tokens: 100,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
+    messages: [{ role: 'user', content: 'selam' }],
+  });
+  assert.equal(requestedEffort, 'low');
+  assert.equal(requestedThinkingBudget, undefined);
+
+  assert.equal(budgetForEffort('low', 'gemini-3.8-flash-tiered', 10_000), 1024);
+  assert.equal(budgetForEffort('medium', 'gemini-3.8-flash-tiered', 10_000), 4096);
+  assert.equal(budgetForEffort('max', 'gemini-3.8-flash-tiered', 10_000), 10_000);
+  assert.equal(budgetForEffort(undefined, 'gemini-3.8-flash-tiered', 10_000), 10_000);
+  assert.equal(budgetForEffort('high', 'claude-sonnet-4-6', 32_768), 16_384);
+  // An effort never buys more than the model's own budget.
+  assert.equal(budgetForEffort('xhigh', 'claude-opus-4-6-thinking', 8_000), 8_000);
 });

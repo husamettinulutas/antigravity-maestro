@@ -525,6 +525,14 @@ export class CloudCodeClient {
 
           const hasNextEndpoint = index + 1 < endpoints.length;
           if (!hasNextEndpoint || !shouldFailover(failure)) {
+            if (failure instanceof HttpError && failure.status === 429) {
+              // The body is the only thing that tells an account's spent quota
+              // from a limit on this client or a request the upstream refuses
+              // outright, and none of those leave any other trace.
+              Logger.warn(
+                `Upstream ${baseUrl} answered 429 for ${params.model}: ${excerpt(failure.body)}`,
+              );
+            }
             settleProjectVerdict(error);
             throw toUpstreamError(failure);
           }
@@ -766,7 +774,7 @@ function retryAfterOf(error: HttpError): number | undefined {
  */
 function retryDelayOf(body: string): number | undefined {
   const text = body.trim();
-  if (text === '' || !text.includes('retryDelay')) {
+  if (text === '' || !/retryDelay|quotaResetDelay/.test(text)) {
     return undefined;
   }
 
@@ -776,7 +784,10 @@ function retryDelayOf(body: string): number | undefined {
     const details = payload?.error?.details;
     if (Array.isArray(details)) {
       for (const detail of details) {
-        const seconds = parseDuration(detail?.retryDelay);
+        // `ErrorInfo` carries the same wait as `quotaResetDelay` when the
+        // body has no `RetryInfo`.
+        const seconds =
+          parseDuration(detail?.retryDelay) ?? parseDuration(detail?.metadata?.quotaResetDelay);
         if (seconds !== undefined) {
           return seconds;
         }
@@ -786,8 +797,17 @@ function retryDelayOf(body: string): number | undefined {
     // Fall through to the raw scan — a truncated body still carries the delay.
   }
 
-  const match = /"retryDelay"\s*:\s*"?(\d+(?:\.\d+)?)s?"?/.exec(text);
+  const match = /"(?:retryDelay|quotaResetDelay)"\s*:\s*"?(\d+(?:\.\d+)?)s?"?/.exec(text);
   return match ? parseDuration(`${match[1]}s`) : undefined;
+}
+
+/** The start of an error body, on one line, for the log. */
+function excerpt(body: string): string {
+  const text = body.replace(/s+/g, ' ').trim();
+  if (text === '') {
+    return '(empty body)';
+  }
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
 }
 
 /** Seconds in a protobuf duration string like `"27s"` or `"1.5s"`. */
