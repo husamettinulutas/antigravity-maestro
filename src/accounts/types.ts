@@ -12,6 +12,12 @@ export interface ModelQuota {
   maxTokens?: number;
   maxOutputTokens?: number;
   recommended?: boolean;
+  /**
+   * Position in the model list the Antigravity client itself offers
+   * (`agentModelSorts`), or undefined for a model it does not show — one kept
+   * for another role, or one whose time has run out but is still reported.
+   */
+  agentOrder?: number;
 }
 
 /** One rolling window (e.g. 5-hour or weekly) from retrieveUserQuotaSummary. */
@@ -38,6 +44,10 @@ export interface QuotaSnapshot {
   groups?: QuotaGroup[];
   /** Upstream renames: old model id → replacement model id. */
   forwardingRules?: Record<string, string>;
+  /** The model the Antigravity client starts a new conversation on. */
+  defaultAgentModelId?: string;
+  /** The current model for each tier the upstream names: `flash`, `pro`, `flashLite`. */
+  tieredModelIds?: Record<string, string[]>;
   subscriptionTier?: string;
   isForbidden?: boolean;
 }

@@ -89,3 +89,20 @@ test('pool label: Claude is named with its version, the newest one fronting the 
   // A dated snapshot's date is not a minor version.
   assert.equal(poolLabel(model('claude-sonnet-4-20250514', 1, '')), 'Sonnet 4');
 });
+
+test("quota pools: the model the Antigravity client lists first fronts the pool", () => {
+  const listed = (modelId: string, agentOrder?: number): ModelQuota => ({
+    ...model(modelId, 100, GEMINI_RESET),
+    agentOrder,
+  });
+  const pools = quotaPools([
+    // Still reported with a quota, but the client stopped offering it.
+    listed('gemini-3-flash-agent'),
+    listed('gemini-3.1-pro-low', 3),
+    listed('gemini-3.8-flash-tiered', 0),
+    listed('gemini-3.7-flash-tiered', 1),
+  ]);
+
+  assert.equal(pools.length, 1);
+  assert.equal(pools[0].model.modelId, 'gemini-3.8-flash-tiered');
+});

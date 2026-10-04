@@ -15,15 +15,15 @@ export interface QuotaPool<T extends ModelQuota = ModelQuota> {
 }
 
 /**
- * Preferred faces for a pool, most wanted first. Whichever member matches the
- * earliest pattern represents the bucket — the newest Claude version among
- * them, so a pool holding Opus 4.6 and 5.5 is named after 5.5 — and anything
- * unmatched falls back to the largest-context model in the pool.
+ * Preferred faces for a pool when the upstream has not said which models are
+ * current, most wanted first. Whichever member matches the earliest pattern
+ * represents the bucket — the newest Claude version among them, so a pool
+ * holding Opus 4.6 and 5.5 is named after 5.5 — and anything unmatched falls
+ * back to the largest-context model in the pool.
  */
 const REPRESENTATIVE_PRIORITY: RegExp[] = [
   /^claude-opus/,
   /^claude-sonnet/,
-  /^gemini-3-flash-agent$/,
   /^gemini-3(\.\d+)?-pro/,
   /^gemini-3(\.\d+)?-flash/,
   /^gemini/,
@@ -123,8 +123,14 @@ function pickRepresentative<T extends ModelQuota>(members: T[]): T {
   const version = (model: T) => claudeVersion(model.modelId)?.order ?? 0;
   const thinks = (model: T) => (/-thinking$/.test(model.modelId) ? 1 : 0);
 
+  // The Antigravity client's own model list comes first: a model it no longer
+  // offers can still be in the quota reading, and naming the Gemini pool after
+  // one that cannot be called is what the pinned "3.5 Flash" face did.
+  const listed = (model: T) => model.agentOrder ?? Number.MAX_SAFE_INTEGER;
+
   return [...members].sort(
     (a, b) =>
+      listed(a) - listed(b) ||
       rank(a) - rank(b) ||
       version(b) - version(a) ||
       thinks(b) - thinks(a) ||

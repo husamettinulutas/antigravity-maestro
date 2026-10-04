@@ -22,6 +22,21 @@
   than "Opus 100%"), and a quota pool holding several Claude versions is
   named after the newest one. The Copilot tooltip and the model pickers say
   which account has a model the active account lacks.
+- **The Gemini row is named after a model Google still offers.** The panel
+  and status bar named the Gemini quota pool "Gemini 3.5 Flash (High)",
+  because that id was pinned in the code. Google still reports the model
+  with a quota reading, but it no longer serves it. The pool is now named
+  after the first model in Google's own list for the Antigravity model
+  picker (`agentModelSorts`), so it follows whatever Antigravity currently
+  offers.
+- **Background requests follow Google's current Flash model.** Claude Code's
+  haiku-class calls for titles and summaries, and the other small-model
+  aliases, were pinned to `gemini-3.5-flash-low`. Without that id they would
+  go to the best model of the family they named, so a haiku request would
+  land on Opus and spend its allowance. They now go to the model Google names as
+  its flash tier (`tieredModelIds`), or the first Flash in the Antigravity
+  list. Other stand-ins also prefer models from that list over ones Google
+  only still reports.
 
 ## 1.0.17
 

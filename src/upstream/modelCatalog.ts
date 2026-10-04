@@ -11,6 +11,8 @@ export interface CatalogModel {
   family: ModelFamily;
   maxInputTokens: number;
   maxOutputTokens: number;
+  /** Position in the Antigravity client's own model list; see `ModelQuota.agentOrder`. */
+  agentOrder?: number;
   /** 0 when the model does not think. */
   thinkingBudget: number;
   supportsThinking: boolean;
@@ -92,14 +94,26 @@ const DEFAULT_THINKING_BUDGET = 24576;
  * at explicit ones, so requests still need somewhere sensible to land.
  */
 const FALLBACK_ALIASES: Record<string, string> = {
-  'claude-3-5-haiku': 'gemini-3.5-flash-low',
-  'claude-haiku-4-5': 'gemini-3.5-flash-low',
-  'claude-3-haiku': 'gemini-3.5-flash-low',
-  'internal-background-task': 'gemini-3.5-flash-low',
   'gpt-5-codex': 'gpt-oss-120b-medium',
-  'gpt-4o-mini': 'gemini-3.5-flash-low',
   'gpt-4o': 'gemini-3-flash',
 };
+
+/**
+ * Small-model names — titles, summaries, background work — that belong on the
+ * upstream's current fast model. Pinning them to one id sent them, once that
+ * id was gone, to the best model of the family they named: a Claude haiku
+ * request landed on Opus and spent its allowance on titles.
+ */
+const FAST_ALIASES = new Set([
+  'claude-3-5-haiku',
+  'claude-haiku-4-5',
+  'claude-3-haiku',
+  'internal-background-task',
+  'gpt-4o-mini',
+]);
+
+/** The fast model for accounts whose reading predates the upstream naming one. */
+const LEGACY_FAST_MODEL = 'gemini-3.5-flash-low';
 
 /**
  * The models an account can actually call, derived from its live quota data.
@@ -181,21 +195,22 @@ export class ModelCatalog {
       }
     }
 
-    const aliased = FALLBACK_ALIASES[normalized];
+    const aliased = FAST_ALIASES.has(normalized)
+      ? fastModel(models, account)
+      : models.find((model) => model.id === FALLBACK_ALIASES[normalized]);
     if (aliased) {
-      const target = models.find((model) => model.id === aliased);
-      if (target) {
-        return { model: target, kind: 'alias' };
-      }
+      return { model: aliased, kind: 'alias' };
     }
 
+    // A stand-in comes from what the Antigravity client offers before anything
+    // the upstream merely still reports, which may no longer answer.
     const family = familyOf(normalized);
     const sameFamily = models.filter((model) => model.family === family && model.supportsTools);
     if (sameFamily.length > 0) {
-      return { model: sameFamily.sort(compareModels)[0], kind: 'family' };
+      return { model: sameFamily.sort(compareStandIns)[0], kind: 'family' };
     }
 
-    const any = models.filter((model) => model.supportsTools).sort(compareModels)[0];
+    const any = models.filter((model) => model.supportsTools).sort(compareStandIns)[0];
     return any ? { model: any, kind: 'any' } : undefined;
   }
 
@@ -238,6 +253,27 @@ export class ModelCatalog {
   }
 }
 
+/**
+ * The account's current fast model: the upstream's own flash tier, else the
+ * first Flash the Antigravity client offers, else the id it used to be.
+ */
+function fastModel(
+  models: CatalogModel[],
+  account: AccountMetadata | undefined,
+): CatalogModel | undefined {
+  const byId = (id: string) => models.find((model) => model.id === id);
+  for (const id of account?.quota?.tieredModelIds?.flash ?? []) {
+    const model = byId(id);
+    if (model) {
+      return model;
+    }
+  }
+  const listedFlash = models
+    .filter((model) => model.agentOrder !== undefined && /flash/.test(model.id) && model.supportsTools)
+    .sort((a, b) => a.agentOrder! - b.agentOrder!)[0];
+  return listedFlash ?? byId(LEGACY_FAST_MODEL);
+}
+
 function buildModels(account: AccountMetadata): CatalogModel[] {
   const quotas = Object.values(account.quota?.models ?? {});
   const names = displayNamesFor(quotas);
@@ -255,6 +291,7 @@ function toCatalogModel(quota: ModelQuota, accountEmail: string, name: string): 
     id,
     displayName: name,
     family,
+    agentOrder: quota.agentOrder,
     maxInputTokens: quota.maxTokens && quota.maxTokens > 0 ? quota.maxTokens : defaultContext(family),
     maxOutputTokens:
       quota.maxOutputTokens && quota.maxOutputTokens > 0
@@ -304,6 +341,12 @@ export function familyOf(modelId: string): ModelFamily {
 
 function normalizeId(modelId: string): string {
   return modelId.trim().replace(/^models\//i, '').toLowerCase();
+}
+
+/** Models the Antigravity client offers first, then as {@link compareModels}. */
+function compareStandIns(a: CatalogModel, b: CatalogModel): number {
+  const listed = Number(b.agentOrder !== undefined) - Number(a.agentOrder !== undefined);
+  return listed || compareModels(a, b);
 }
 
 /** Highest remaining quota first, then alphabetical for a stable list. */

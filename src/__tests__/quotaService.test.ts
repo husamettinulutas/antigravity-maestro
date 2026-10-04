@@ -87,3 +87,34 @@ test('quota: live models survive when nothing is retired', async () => {
     restore();
   }
 });
+
+test("quota: the Antigravity client's own model list and tiers are kept", async () => {
+  const restore = stubUpstream({
+    models: {
+      'gemini-3-flash-agent': model(0.97),
+      'gemini-3.8-flash-tiered': model(0.97),
+      'claude-opus-5-5-high': model(1),
+    },
+    agentModelSorts: [
+      {
+        displayName: 'Recommended',
+        groups: [{ modelIds: ['gemini-3.8-flash-tiered', 'claude-opus-5-5-high', 'not-offered'] }],
+      },
+    ],
+    defaultAgentModelId: 'gemini-3.8-flash-tiered',
+    tieredModelIds: { flash: ['gemini-3.8-flash-tiered'], pro: ['gemini-3.1-pro-low'] },
+  });
+
+  try {
+    const snapshot = await fetchQuota('token');
+    assert.equal(snapshot.models['gemini-3.8-flash-tiered'].agentOrder, 0);
+    assert.equal(snapshot.models['claude-opus-5-5-high'].agentOrder, 1);
+    // Still reported, no longer offered by the client.
+    assert.equal(snapshot.models['gemini-3-flash-agent'].agentOrder, undefined);
+    assert.equal(snapshot.defaultAgentModelId, 'gemini-3.8-flash-tiered');
+    // A tier naming a model the account was not given is left out.
+    assert.deepEqual(snapshot.tieredModelIds, { flash: ['gemini-3.8-flash-tiered'] });
+  } finally {
+    restore();
+  }
+});

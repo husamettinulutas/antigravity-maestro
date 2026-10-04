@@ -94,3 +94,28 @@ test('catalog: a retired model resolves to the successor the upstream named', ()
   assert.equal(match?.kind, 'forwarded');
   assert.equal(subject.resolveMatch('claude-opus-5-5-medium', 'a')?.kind, 'exact');
 });
+
+test("catalog: background requests go to the upstream's current fast model", () => {
+  const reading = quota({
+    'gemini-3.5-flash-low': 100,
+    'gemini-3.8-flash-tiered': 100,
+    'claude-opus-5-5-high': 100,
+  });
+  const subject = catalog([
+    { id: 'tiered', email: 't@example.com', quota: { ...reading, tieredModelIds: { flash: ['gemini-3.8-flash-tiered'] } } },
+    { id: 'legacy', email: 'l@example.com', quota: reading },
+  ]);
+
+  assert.equal(subject.resolve('claude-haiku-4-5', 'tiered')?.id, 'gemini-3.8-flash-tiered');
+  // A reading without tiers keeps the id it always used.
+  assert.equal(subject.resolve('claude-haiku-4-5', 'legacy')?.id, 'gemini-3.5-flash-low');
+});
+
+test('catalog: with the fast model gone, a haiku request does not land on Opus', () => {
+  const reading: any = quota({ 'gemini-3.8-flash-tiered': 90, 'claude-opus-5-5-high': 100 });
+  reading.models['gemini-3.8-flash-tiered'].agentOrder = 0;
+  reading.models['claude-opus-5-5-high'].agentOrder = 1;
+  const subject = catalog([{ id: 'a', email: 'a@example.com', quota: reading }]);
+
+  assert.equal(subject.resolve('claude-haiku-4-5', 'a')?.id, 'gemini-3.8-flash-tiered');
+});

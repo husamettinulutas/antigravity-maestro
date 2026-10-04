@@ -94,6 +94,8 @@ export async function fetchQuota(accessToken: string): Promise<QuotaSnapshot> {
     fetchedAt: Date.now(),
     models: models.models,
     forwardingRules: models.forwardingRules,
+    defaultAgentModelId: models.defaultAgentModelId,
+    tieredModelIds: models.tieredModelIds,
     groups,
     projectId: context.projectId,
     subscriptionTier: context.subscriptionTier,
@@ -104,7 +106,9 @@ export async function fetchQuota(accessToken: string): Promise<QuotaSnapshot> {
 async function fetchAvailableModels(
   accessToken: string,
   projectId: string | undefined,
-): Promise<{ models: Record<string, ModelQuota>; forwardingRules?: Record<string, string> }> {
+): Promise<
+  Pick<QuotaSnapshot, 'models' | 'forwardingRules' | 'defaultAgentModelId' | 'tieredModelIds'>
+> {
   let lastError: unknown;
 
   for (let index = 0; index < AVAILABLE_MODELS_ENDPOINTS.length; index++) {
@@ -120,9 +124,12 @@ async function fetchAvailableModels(
           payload,
           requestOptions(accessToken),
         );
+        const models = toModelQuotas(data.models, data.deprecatedModelIds, data.agentModelSorts);
         return {
-          models: toModelQuotas(data.models, data.deprecatedModelIds),
+          models,
           forwardingRules: toForwardingRules(data.deprecatedModelIds),
+          defaultAgentModelId: offered(data.defaultAgentModelId, models),
+          tieredModelIds: toTieredModelIds(data.tieredModelIds, models),
         };
       } catch (error) {
         lastError = error;
@@ -201,9 +208,11 @@ function requestOptions(accessToken: string) {
 function toModelQuotas(
   models: FetchModelsResponse['models'],
   deprecated: FetchModelsResponse['deprecatedModelIds'],
+  sorts?: FetchModelsResponse['agentModelSorts'],
 ): Record<string, ModelQuota> {
   const result: Record<string, ModelQuota> = {};
   const retired = new Set(Object.keys(deprecated ?? {}));
+  const agentOrder = toAgentOrder(sorts);
   const dropped: string[] = [];
 
   for (const [modelId, info] of Object.entries(models ?? {})) {
@@ -225,6 +234,7 @@ function toModelQuotas(
       maxTokens: info.maxTokens,
       maxOutputTokens: info.maxOutputTokens,
       recommended: info.recommended,
+      agentOrder: agentOrder.get(modelId),
     };
   }
 
@@ -243,6 +253,7 @@ function toModelQuotas(
       upstream: models?.[quota.modelId]?.displayName,
       shown: quota.displayName,
       percent: quota.percentage,
+      agentOrder: quota.agentOrder,
     })),
   );
 
@@ -261,6 +272,50 @@ function toModelQuotas(
   }
 
   return result;
+}
+
+/**
+ * Where each model sits in the list the Antigravity client offers.
+ *
+ * That list is the upstream's own word on which models are current: a model
+ * can stay in `models` with a quota reading after the client stops offering
+ * it, as Gemini 3.5 Flash did once its limited-time run was over — so the list,
+ * not the model table, is what decides which model fronts a family.
+ */
+function toAgentOrder(sorts: FetchModelsResponse['agentModelSorts']): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const sort of sorts ?? []) {
+    for (const group of sort?.groups ?? []) {
+      for (const modelId of group?.modelIds ?? []) {
+        if (typeof modelId === 'string' && !order.has(modelId)) {
+          order.set(modelId, order.size);
+        }
+      }
+    }
+  }
+  return order;
+}
+
+/** The id, while it is one of the models the account was offered. */
+function offered(
+  modelId: string | undefined,
+  models: Record<string, ModelQuota>,
+): string | undefined {
+  return modelId && models[modelId] ? modelId : undefined;
+}
+
+function toTieredModelIds(
+  tiers: FetchModelsResponse['tieredModelIds'],
+  models: Record<string, ModelQuota>,
+): Record<string, string[]> | undefined {
+  const result: Record<string, string[]> = {};
+  for (const [tier, ids] of Object.entries(tiers ?? {})) {
+    const live = Array.isArray(ids) ? ids.filter((id) => offered(id, models)) : [];
+    if (live.length > 0) {
+      result[tier] = live;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function toForwardingRules(
@@ -357,6 +412,10 @@ interface FetchModelsResponse {
     }
   >;
   deprecatedModelIds?: Record<string, { newModelId?: string }>;
+  /** The Antigravity client's model picker, in its order. */
+  agentModelSorts?: { displayName?: string; groups?: { modelIds?: string[] }[] }[];
+  defaultAgentModelId?: string;
+  tieredModelIds?: Record<string, string[]>;
 }
 
 interface QuotaSummaryResponse {
