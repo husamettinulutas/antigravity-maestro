@@ -1,12 +1,13 @@
 # Changelog
 
-## 1.0.19
+## 1.1.0
 
 - **Copilot Chat offers a Thinking Effort choice for the tiered Gemini Flash
   models.** Google serves `gemini-3.8-flash-tiered` and the other `*-tiered`
   ids as one model whose effort each request picks. Where VS Code supports
-  it, the model picker now shows a Low / Medium / High control for them:
-  about 1K or 4K tokens of thinking, or the model's full budget.
+  it, the model picker now shows a Low / Medium / High control for them, in
+  the Local harness and the Copilot CLI one alike: about 1K or 4K tokens of
+  thinking, or the model's full budget.
   `antigravityMaestro.copilot.thinkingEffort` sets the default, and is what
   a VS Code without the control uses. These models are listed as "Gemini 3.8
   Flash" instead of "Gemini 3.8 Flash (Tiered)", unless another model already
