@@ -1,5 +1,5 @@
 import { CatalogModel, MATCH_KINDS, MatchKind, ModelCatalog } from '../upstream/modelCatalog';
-import { UpstreamError } from '../upstream/cloudCodeClient';
+import { ModelRetiredError, UpstreamError } from '../upstream/cloudCodeClient';
 import { UsageMetadata } from '../protocol/gemini';
 import { Config } from '../utils/config';
 import { Logger } from '../utils/logger';
@@ -151,6 +151,7 @@ export class AccountLease {
   ): Promise<T> {
     let lastError: unknown;
     let waited = false;
+    let rerouted = false;
 
     for (;;) {
       const candidates = this.preferSession(
@@ -164,6 +165,13 @@ export class AccountLease {
           return outcome.result as T;
         }
         lastError = outcome.error ?? lastError;
+        // The model was withdrawn and every catalog has dropped it, so the
+        // same request now resolves to its successor. Asked once: a successor
+        // withdrawn as well is reported rather than chased.
+        if (outcome.retired && !rerouted) {
+          rerouted = true;
+          continue;
+        }
       }
 
       // Sending anyway would earn another rate limit and burn more quota, so
@@ -195,7 +203,7 @@ export class AccountLease {
     candidates: AccountMetadata[],
     execute: (context: LeaseContext) => Promise<T>,
     session?: string,
-  ): Promise<{ served: boolean; result?: T; error?: unknown }> {
+  ): Promise<{ served: boolean; result?: T; error?: unknown; retired?: boolean }> {
     let lastError: unknown;
     const strikes: RateLimitStrike[] = [];
     const bound = session ? this.sessions.get(session)?.accountId : undefined;
@@ -236,6 +244,21 @@ export class AccountLease {
         return { served: true, result };
       } catch (error) {
         lastError = error;
+
+        // Withdrawn for everyone, so no other account is worth a request for
+        // it — the user would only see the same notice in place of an answer.
+        if (error instanceof ModelRetiredError) {
+          const successor = await this.accounts.retireModel(
+            error.modelId,
+            error.retiredName,
+            error.successorName,
+          );
+          Logger.warn(
+            `${model.id} answered "${error.message}"; ` +
+              (successor ? `sending the request to ${successor}` : 'sending the request to the nearest model'),
+          );
+          return { served: false, error, retired: true };
+        }
 
         if (error instanceof UpstreamError && error.isRateLimit) {
           this.markCooldown(account.id, model.id, error.retryAfterSeconds, error.message);

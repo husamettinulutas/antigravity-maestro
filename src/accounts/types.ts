@@ -71,6 +71,15 @@ export interface AccountMetadata {
   quota?: QuotaSnapshot;
 }
 
+/** A model the upstream answered with its "no longer available" notice. */
+export interface RetiredModel {
+  /** What the notice called it, e.g. "Gemini 3.5 Flash". */
+  name: string;
+  /** The upstream id requests for it go to instead, when one could be found. */
+  successor?: string;
+  at: number;
+}
+
 /** A cached access token with its expiry. */
 export interface AccessToken {
   token: string;

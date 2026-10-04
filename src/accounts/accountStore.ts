@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { AccountMetadata } from './types';
+import { AccountMetadata, RetiredModel } from './types';
 
 const ACCOUNTS_KEY = 'antigravityMaestro.accounts';
 const ACTIVE_ACCOUNT_KEY = 'antigravityMaestro.activeAccountId';
 const REFRESH_TOKEN_PREFIX = 'antigravityMaestro.refresh.';
+const RETIRED_MODELS_KEY = 'antigravityMaestro.retiredModels';
 
 /**
  * Persistence for accounts: metadata in globalState, refresh tokens in
@@ -79,6 +80,15 @@ export class AccountStore {
 
   async setActiveId(accountId: string | undefined): Promise<void> {
     await this.globalState.update(ACTIVE_ACCOUNT_KEY, accountId);
+  }
+
+  /** Models the upstream has said are withdrawn, by upstream id. */
+  retiredModels(): Record<string, RetiredModel> {
+    return this.globalState.get<Record<string, RetiredModel>>(RETIRED_MODELS_KEY, {});
+  }
+
+  async setRetiredModels(retired: Record<string, RetiredModel>): Promise<void> {
+    await this.globalState.update(RETIRED_MODELS_KEY, retired);
   }
 
   getRefreshToken(accountId: string): Thenable<string | undefined> {

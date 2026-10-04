@@ -7,7 +7,7 @@ import { startLoopbackServer } from '../auth/loopbackServer';
 import { AccountStore } from './accountStore';
 import { fetchQuota, QuotaForbiddenError, QuotaUnauthorizedError } from './quotaService';
 import { QuotaHistory } from './quotaHistory';
-import { AccessToken, AccountMetadata } from './types';
+import { AccessToken, AccountMetadata, ModelQuota, QuotaSnapshot, RetiredModel } from './types';
 import { mapWithConcurrency } from '../utils/concurrency';
 
 /** Refresh an access token this long before it actually expires. */
@@ -238,7 +238,7 @@ export class AccountManager implements vscode.Disposable {
 
     try {
       const accessToken = await this.getAccessToken(accountId);
-      const snapshot = await fetchQuota(accessToken);
+      const snapshot = withoutRetired(await fetchQuota(accessToken), this.store.retiredModels());
 
       await this.store.patch(accountId, {
         quota: snapshot,
@@ -266,6 +266,58 @@ export class AccountManager implements vscode.Disposable {
       }
       this.onDidChangeEmitter.fire();
     }
+  }
+
+  /**
+   * Withdraw a model the upstream answered with its "no longer available"
+   * notice, on every account, for good.
+   *
+   * Nothing in the model list marks such a model — it keeps its quota reading
+   * and its place in the table — so the notice is the only word the extension
+   * gets, and each picker kept offering a model that could only ever answer
+   * with that sentence. The notice names the model without its effort
+   * ("Gemini 3.5 Flash"), so every effort of it goes together, and each is
+   * pointed at the same effort of the model the notice names instead.
+   *
+   * Returns the id requests for `modelId` should now go to, if one was found.
+   */
+  async retireModel(
+    modelId: string,
+    retiredName: string,
+    successorName: string | undefined,
+  ): Promise<string | undefined> {
+    const models = this.list().flatMap((account) => Object.values(account.quota?.models ?? {}));
+    const ids = new Set([modelId]);
+    for (const model of models) {
+      if (namedAs(model, retiredName)) {
+        ids.add(model.modelId);
+      }
+    }
+
+    const live = models.filter((model) => !ids.has(model.modelId));
+    const retired = { ...this.store.retiredModels() };
+    for (const id of ids) {
+      const before = models.find((model) => model.modelId === id);
+      retired[id] = {
+        name: retiredName,
+        successor: successorName ? successorFor(before, successorName, live) : undefined,
+        at: Date.now(),
+      };
+    }
+    await this.store.setRetiredModels(retired);
+
+    for (const account of this.list()) {
+      if (account.quota) {
+        await this.store.patch(account.id, { quota: withoutRetired(account.quota, retired) });
+      }
+    }
+
+    Logger.info(
+      `Antigravity no longer serves ${retiredName}; withdrew ` +
+        [...ids].map((id) => `${id} → ${retired[id].successor ?? 'nearest model'}`).join(', '),
+    );
+    this.onDidChangeEmitter.fire();
+    return retired[modelId].successor;
   }
 
   /**
@@ -311,4 +363,58 @@ export class AccountManager implements vscode.Disposable {
     this.onDidChangeEmitter.dispose();
     this.onDidChooseActiveEmitter.dispose();
   }
+}
+
+/**
+ * A quota reading without the models the upstream has withdrawn, each pointed
+ * at its successor while the account is offered one.
+ */
+function withoutRetired(
+  snapshot: QuotaSnapshot,
+  retired: Record<string, RetiredModel>,
+): QuotaSnapshot {
+  const ids = Object.keys(retired).filter((id) => snapshot.models[id]);
+  if (ids.length === 0) {
+    return snapshot;
+  }
+  const models = { ...snapshot.models };
+  const forwardingRules = { ...snapshot.forwardingRules };
+  for (const id of ids) {
+    delete models[id];
+    const successor = retired[id].successor;
+    if (successor && models[successor] && !forwardingRules[id]) {
+      forwardingRules[id] = successor;
+    }
+  }
+  return { ...snapshot, models, forwardingRules };
+}
+
+/** True when `name` is this model's name, with or without its effort. */
+function namedAs(model: ModelQuota, name: string): boolean {
+  const label = model.displayName?.trim().toLowerCase();
+  const wanted = name.trim().toLowerCase();
+  return label !== undefined && (label === wanted || label.startsWith(`${wanted} (`));
+}
+
+/**
+ * The model a withdrawn one's requests go to: the named successor at the same
+ * effort, else the one the Antigravity client lists first, else any of them.
+ */
+function successorFor(
+  retired: ModelQuota | undefined,
+  successorName: string,
+  live: ModelQuota[],
+): string | undefined {
+  const named = live.filter((model) => namedAs(model, successorName));
+  const effort = retired?.displayName?.match(/\([^)]*\)\s*$/)?.[0];
+  const sameEffort = effort
+    ? named.find((model) => model.displayName?.trim().endsWith(effort))
+    : undefined;
+  if (sameEffort) {
+    return sameEffort.modelId;
+  }
+  const listed = named
+    .filter((model) => model.agentOrder !== undefined)
+    .sort((a, b) => a.agentOrder! - b.agentOrder!)[0];
+  return (listed ?? named[0])?.modelId;
 }

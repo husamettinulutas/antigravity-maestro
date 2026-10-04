@@ -344,7 +344,9 @@ test('stream: an upstream that goes quiet is dropped with a named error', async 
         return true;
       },
     );
-    assert.equal(seen.length, 1);
+    // The one short line of text is held back in case it is a withdrawal
+    // notice, so nothing was shown and the turn can still be asked again.
+    assert.equal(seen.length, 0);
   } finally {
     restore();
     delete testSettings['requestTimeoutSeconds'];

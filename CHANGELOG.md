@@ -29,6 +29,19 @@
   after the first model in Google's own list for the Antigravity model
   picker (`agentModelSorts`), so it follows whatever Antigravity currently
   offers.
+- **A model Google has withdrawn disappears from every list, and its request
+  goes to the model Google names instead.** Gemini 3.5 Flash still appears
+  in Google's model list with a full quota, so it stayed in the Copilot,
+  Claude Code and Codex pickers. Every message to it got "Gemini 3.5 Flash
+  is no longer available. Please switch to Gemini 3.7 Flash in the latest
+  version of Antigravity." back as the answer. That sentence is the only
+  signal Google gives, so the gateway now recognises it before any of it
+  reaches the chat and removes every effort of that model on all accounts.
+  The removal is kept across restarts and quota refreshes. The same request
+  is then sent again to the named model at the same effort (3.5 Flash High
+  goes to 3.7 Flash High), so the user gets an answer instead of the notice.
+  A short reply made only of text is held back for its first ~120
+  characters until it is clearly not that notice.
 - **Background requests follow Google's current Flash model.** Claude Code's
   haiku-class calls for titles and summaries, and the other small-model
   aliases, were pinned to `gemini-3.5-flash-low`. Without that id they would

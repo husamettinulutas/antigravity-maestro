@@ -5,6 +5,7 @@ import { officialRequestId, sessionIdFor } from '../utils/ids';
 import { Logger } from '../utils/logger';
 import { parseSse } from '../utils/sse';
 import { modelSpecificHeaders } from './constraints';
+import { couldBeNotice, plainTextOf, retirementNotice } from './retirement';
 import { bodyUserAgent, clientIdentity, currentUserAgent, currentVersion } from './userAgent';
 
 /**
@@ -279,6 +280,68 @@ export class StreamBrokenError extends UpstreamError {
 }
 
 /**
+ * A request answered with the upstream's notice that the model is withdrawn
+ * ("Gemini 3.5 Flash is no longer available. Please switch to …") instead of
+ * a reply. Not a failure of the account or the request: the model is gone for
+ * everyone, and the request belongs on the model the notice names.
+ */
+export class ModelRetiredError extends UpstreamError {
+  constructor(
+    /** The upstream id the request was sent to. */
+    readonly modelId: string,
+    /** The model the notice names as withdrawn, e.g. "Gemini 3.5 Flash". */
+    readonly retiredName: string,
+    /** The model the notice says to use instead, when it names one. */
+    readonly successorName: string | undefined,
+    notice: string,
+  ) {
+    super(notice, 410, '');
+    this.name = 'ModelRetiredError';
+  }
+}
+
+/**
+ * Pass a stream through, throwing {@link ModelRetiredError} when the whole of
+ * it is the withdrawal notice.
+ *
+ * The caller has to learn that before any of the notice reaches the user, so
+ * a reply made only of visible text is held back until it is clearly not the
+ * notice — a few dozen characters, or the first reasoning or tool call.
+ */
+export async function* screenForRetirement(
+  modelId: string,
+  chunks: AsyncIterable<GeminiResponse>,
+): AsyncGenerator<GeminiResponse> {
+  const held: GeminiResponse[] = [];
+  let heldText: string | undefined = '';
+
+  for await (const chunk of chunks) {
+    if (heldText === undefined) {
+      yield chunk;
+      continue;
+    }
+    const text = plainTextOf(chunk);
+    heldText = text === undefined ? undefined : heldText + text;
+    held.push(chunk);
+    if (heldText !== undefined && couldBeNotice(heldText)) {
+      continue;
+    }
+    heldText = undefined;
+    yield* held.splice(0);
+  }
+
+  throwIfRetired(modelId, heldText);
+  yield* held;
+}
+
+function throwIfRetired(modelId: string, text: string | undefined): void {
+  const notice = text === undefined ? undefined : retirementNotice(text);
+  if (notice) {
+    throw new ModelRetiredError(modelId, notice.retiredName, notice.successorName, notice.text);
+  }
+}
+
+/**
  * 403 bodies that name the account, not the request.
  *
  * The endpoints answer with 403 both when they dislike `x-goog-user-project`
@@ -306,7 +369,9 @@ export class CloudCodeClient {
     const text = await readBody(response.stream);
     const payload = parseJson(text);
     // The internal endpoint wraps its result; the public shape is bare.
-    return (payload?.response ?? payload ?? {}) as GeminiResponse;
+    const result = (payload?.response ?? payload ?? {}) as GeminiResponse;
+    throwIfRetired(params.model, plainTextOf(result));
+    return result;
   }
 
   /**
@@ -371,7 +436,7 @@ export class CloudCodeClient {
       }
     }
 
-    return iterate();
+    return screenForRetirement(params.model, iterate());
   }
 
   /** Pace the request against the account's allowance, then dispatch it. */
