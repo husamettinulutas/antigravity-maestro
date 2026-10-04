@@ -7,6 +7,12 @@
  * chosen value arrives in `options.modelConfiguration`. The effort becomes a
  * budget through `budgetForEffort`, the same table Claude Code's `--effort`
  * goes through, so both clients think alike at the same effort.
+ *
+ * The property has to be called `reasoningEffort`. The local harness draws any
+ * property as a picker, but the Copilot CLI harness only carries that one
+ * across: VS Code reads its enum into the CLI's own effort picker, and hands
+ * the CLI's choice back as `modelConfiguration.reasoningEffort`. Under any
+ * other name the CLI offered the model without the choice.
  */
 
 export type ThinkingEffort = 'low' | 'medium' | 'high';
@@ -38,7 +44,7 @@ export function resolveThinkingEffort(
   settingValue?: unknown,
 ): ThinkingEffort {
   return (
-    parseThinkingEffort(modelConfiguration?.thinkingEffort) ??
+    parseThinkingEffort(modelConfiguration?.reasoningEffort) ??
     parseThinkingEffort(settingValue) ??
     DEFAULT_THINKING_EFFORT
   );
@@ -48,7 +54,7 @@ export function resolveThinkingEffort(
 export function thinkingEffortSchema(defaultEffort: ThinkingEffort) {
   return {
     properties: {
-      thinkingEffort: {
+      reasoningEffort: {
         type: 'string',
         title: 'Thinking Effort',
         description: 'How much the model reasons before answering.',

@@ -669,13 +669,13 @@ test('thinking effort: a tiered model thinks as much as the picker says', async 
   const { sent, run, context } = harness(ANSWER, ANSWER, ANSWER);
   context.model = TIERED;
 
-  await run(HELLO, { modelConfiguration: { thinkingEffort: 'low' } });
+  await run(HELLO, { modelConfiguration: { reasoningEffort: 'low' } });
   testSettings['copilot.thinkingEffort'] = 'medium';
   try {
     // Nothing chosen in the picker: the setting decides.
     await run(HELLO);
     // A choice in the picker still wins over the setting.
-    await run(HELLO, { modelConfiguration: { thinkingEffort: 'high' } });
+    await run(HELLO, { modelConfiguration: { reasoningEffort: 'high' } });
   } finally {
     delete testSettings['copilot.thinkingEffort'];
   }
@@ -691,7 +691,7 @@ test('thinking effort: a model whose id names its effort keeps its own budget', 
   const { sent, run, context } = harness(ANSWER);
   context.model = { ...TIERED, id: 'gemini-3.6-flash-high' };
 
-  await run(HELLO, { modelConfiguration: { thinkingEffort: 'low' } });
+  await run(HELLO, { modelConfiguration: { reasoningEffort: 'low' } });
 
   assert.equal(sent[0].generationConfig.thinkingConfig.thinkingBudget, 10_000);
 });
@@ -720,7 +720,7 @@ test('thinking effort: only a tiered model offers the choice, opening on the set
     const schemas = Object.fromEntries(
       offered.map((info: any) => [info.id, info.configurationSchema]),
     );
-    assert.equal(schemas['gemini-3.8-flash-tiered'].properties.thinkingEffort.default, 'low');
+    assert.equal(schemas['gemini-3.8-flash-tiered'].properties.reasoningEffort.default, 'low');
     assert.equal(schemas['gemini-3.8-flash-high'], undefined);
     assert.equal(schemas['gemini-3.1-flash-lite'], undefined);
   } finally {

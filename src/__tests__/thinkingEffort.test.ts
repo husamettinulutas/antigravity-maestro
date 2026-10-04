@@ -13,13 +13,16 @@ test('only -tiered ids are tiered', () => {
 });
 
 test('picker choice wins over the setting, which wins over the default', () => {
-  assert.equal(resolveThinkingEffort({ thinkingEffort: 'low' }, 'high'), 'low');
+  assert.equal(resolveThinkingEffort({ reasoningEffort: 'low' }, 'high'), 'low');
   assert.equal(resolveThinkingEffort(undefined, 'medium'), 'medium');
-  assert.equal(resolveThinkingEffort({ thinkingEffort: 'bogus' }, undefined), 'high');
+  assert.equal(resolveThinkingEffort({ reasoningEffort: 'bogus' }, undefined), 'high');
 });
 
 test('schema offers Low/Medium/High as a primary picker action', () => {
-  const prop = thinkingEffortSchema('medium').properties.thinkingEffort;
+  // `reasoningEffort` is the one property VS Code carries over to the Copilot
+  // CLI harness, as its string enum and default; under another name the CLI
+  // showed the model with no effort to pick.
+  const prop = thinkingEffortSchema('medium').properties.reasoningEffort;
   assert.deepEqual(prop.enum, ['low', 'medium', 'high']);
   assert.deepEqual(prop.enumItemLabels, ['Low', 'Medium', 'High']);
   assert.equal(prop.default, 'medium');
