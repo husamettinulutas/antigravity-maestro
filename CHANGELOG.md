@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.18
+
+- **A model only another account has is now served by that account.**
+  Accounts on different plans are offered different models — one has Claude
+  Opus 5.5 where another still has Opus 4.6 — and Copilot, Claude Code and
+  Codex list every account's models together. Picking Opus 5.5 while the
+  active account only had 4.6 got an answer from Opus 4.6 on the active
+  account: every account resolves a Claude id to *some* Claude model, and the
+  active account is always tried first. Copilot still showed Opus 5.5. Only
+  the accounts with the closest match are tried now, so the request moves to
+  the account that has the model and that account becomes the active one. A
+  stand-in is used only when no account has anything closer.
+- If the account that has the model is rate limited, the request waits for
+  it instead of falling back to another model, and the error counts the
+  accounts "without this model" separately. With rotation set to `manual`,
+  the error names the account that has the model.
+- A retired model goes to the successor Google names for it. Google keeps
+  sending that mapping, and it was stored but never used.
+- The status bar names Claude with its version ("Opus 5.5 100%" rather
+  than "Opus 100%"), and a quota pool holding several Claude versions is
+  named after the newest one. The Copilot tooltip and the model pickers say
+  which account has a model the active account lacks.
+
 ## 1.0.17
 
 - **Claude Code works on Gemini 3.7/3.8 Flash again instead of "Every
