@@ -9,6 +9,8 @@
  * every request carries — so the name is built from it.
  */
 
+import { isTieredModel } from './thinkingEffort';
+
 /**
  * Name a whole model list at once.
  *
@@ -22,6 +24,9 @@
  * left as it is. Every surface that shows a name shows the id beside it (the
  * model pickers list both, and the panel prints the id under each card), so
  * repeating the id inside the name only reads as a stutter.
+ *
+ * A `*-tiered` model drops its "(Tiered)": its effort is picked per request,
+ * not by the name. It keeps it when another model already has the bare name.
  */
 export function displayNamesFor(
   models: readonly { modelId: string; displayName?: string }[],
@@ -44,10 +49,9 @@ export function displayNamesFor(
     names[model.modelId] = displayNameFor(model.modelId) ?? label ?? model.modelId;
   }
 
-  // "Gemini 3.8 Flash (Tiered)" → "Gemini 3.8 Flash": the effort is picked in
-  // the model picker. Kept as is if that would make two models share a name.
+  // "Gemini 3.8 Flash (Tiered)" → "Gemini 3.8 Flash", unless that name is taken.
   for (const model of models) {
-    if (!/-tiered$/i.test(model.modelId)) {
+    if (!isTieredModel(model.modelId)) {
       continue;
     }
     const stripped = names[model.modelId].replace(/\s*\(tiered\)\s*$/i, '').trim();
@@ -69,8 +73,9 @@ const MODES: Record<string, string> = {
   low: 'Low',
   'extra-low': 'Extra low',
   minimal: 'Minimal',
-  // The effort of a tiered model is chosen in the picker, so it is not part of the name.
-  tiered: '',
+  // `displayNamesFor` drops it where no other model has the bare name. Left
+  // empty here, `gemini-3.8-flash` and `gemini-3.8-flash-tiered` read alike.
+  tiered: 'Tiered',
   agent: 'Agent',
 };
 

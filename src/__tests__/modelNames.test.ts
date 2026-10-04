@@ -7,7 +7,7 @@ test('model names are built from the id, not the upstream label', () => {
   // The ids the upstream actually serves — several of them come back sharing
   // one stale display name, which is what made the model list unreadable.
   assert.equal(displayNameFor('gemini-3.5-flash-high'), 'Gemini 3.5 Flash (High)');
-  assert.equal(displayNameFor('gemini-3.7-flash-tiered'), 'Gemini 3.7 Flash');
+  assert.equal(displayNameFor('gemini-3.7-flash-tiered'), 'Gemini 3.7 Flash (Tiered)');
   assert.equal(displayNameFor('gemini-3.5-flash-extra-low'), 'Gemini 3.5 Flash (Extra low)');
   assert.equal(displayNameFor('gemini-3-flash-agent'), 'Gemini 3 Flash (Agent)');
   assert.equal(displayNameFor('gemini-3.1-flash-lite'), 'Gemini 3.1 Flash Lite');
@@ -91,4 +91,25 @@ test('the upstream\'s "(Tiered)" label is dropped from the name', () => {
   ]);
   assert.equal(names['gemini-3.8-flash-tiered'], 'Gemini 3.8 Flash');
   assert.equal(names['gemini-3.8-flash-high'], 'Gemini 3.8 Flash (High)');
+
+  // A name derived from the id drops it too.
+  assert.deepEqual(displayNamesFor([{ modelId: 'gemini-3.7-flash-tiered' }]), {
+    'gemini-3.7-flash-tiered': 'Gemini 3.7 Flash',
+  });
+});
+
+test('a tiered model keeps "(Tiered)" where another model has the bare name', () => {
+  // With no label to go on, both names come from the id.
+  assert.deepEqual(
+    displayNamesFor([{ modelId: 'gemini-3.8-flash' }, { modelId: 'gemini-3.8-flash-tiered' }]),
+    { 'gemini-3.8-flash': 'Gemini 3.8 Flash', 'gemini-3.8-flash-tiered': 'Gemini 3.8 Flash (Tiered)' },
+  );
+  // A label the two share says nothing either.
+  assert.deepEqual(
+    displayNamesFor([
+      { modelId: 'gemini-3-flash', displayName: 'Gemini 3 Flash' },
+      { modelId: 'gemini-3-flash-tiered', displayName: 'Gemini 3 Flash' },
+    ]),
+    { 'gemini-3-flash': 'Gemini 3 Flash', 'gemini-3-flash-tiered': 'Gemini 3 Flash (Tiered)' },
+  );
 });

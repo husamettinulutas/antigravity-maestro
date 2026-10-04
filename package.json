@@ -45,9 +45,6 @@
   ],
   "main": "./dist/extension.js",
   "type": "commonjs",
-  "enabledApiProposals": [
-    "chatProvider"
-  ],
   "contributes": {
     "languageModelChatProviders": [
       {
@@ -194,21 +191,6 @@
           "maximum": 65535,
           "description": "Preferred port for the local gateway that Claude Code and Codex talk to. If it is busy, the next free port is used instead. The gateway only binds to 127.0.0.1."
         },
-        "antigravityMaestro.thinkingEffort": {
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "default": "high",
-          "description": "Default thinking effort for the Gemini Flash (Tiered) models in Copilot Chat. The Thinking Effort control in the model picker takes precedence when your VS Code version shows it."
-        },
-        "antigravityMaestro.copilot.hideSplitEffortModels": {
-          "type": "boolean",
-          "default": false,
-          "description": "Hide the Low / Medium / High variants (for example \"Gemini 3.8 Flash (High)\") from the Copilot Chat model picker when the same model is also offered with a Thinking Effort control. Models without such a replacement (Gemini Pro, Claude, ...) are never hidden."
-        },
         "antigravityMaestro.gateway.autoStart": {
           "type": "boolean",
           "default": true,
@@ -278,6 +260,21 @@
           "type": "string",
           "default": "",
           "description": "Override the built-in Google OAuth client secret. Only used together with antigravityMaestro.oauth.clientId."
+        },
+        "antigravityMaestro.copilot.thinkingEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "high",
+          "description": "Thinking effort for the Gemini Flash models whose id ends in -tiered, in Copilot Chat. The Thinking Effort control in the model picker overrides it where your VS Code shows one. Claude Code follows its own --effort instead.",
+          "enumDescriptions": [
+            "About 1K tokens of thinking",
+            "About 4K tokens of thinking",
+            "The model's full thinking budget"
+          ]
         },
         "antigravityMaestro.claudeCode.settingsScope": {
           "type": "string",

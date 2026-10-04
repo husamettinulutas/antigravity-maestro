@@ -18,8 +18,7 @@ export const Config = {
   claudeCodeSettingsScope: (): 'user' | 'project' => get('claudeCode.settingsScope', 'user'),
   claudeCodeSmallFastModel: (): string => get<string>('claudeCode.smallFastModel', '').trim(),
   codexConfigPath: (): string => get<string>('codex.configPath', '').trim(),
-  thinkingEffort: (): string => get<string>('thinkingEffort', 'high'),
-  hideSplitEffortModels: (): boolean => get<boolean>('copilot.hideSplitEffortModels', false),
+  copilotThinkingEffort: (): string => get<string>('copilot.thinkingEffort', 'high'),
   reloadOnModelChange: (): 'prompt' | 'auto' | 'never' => get('reloadOnModelChange', 'prompt'),
 
   /** Remember the background model the apply flow just picked. */

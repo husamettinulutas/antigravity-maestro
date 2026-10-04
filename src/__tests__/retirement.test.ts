@@ -95,7 +95,7 @@ test('retirement: an ordinary answer passes through whole and in order', async (
 });
 
 /** Two accounts as the upstream reports them: 3.5 Flash still listed beside 3.7. */
-function manager() {
+function manager(extra: Record<string, string> = {}) {
   const reading = (extra: Record<string, string> = {}) => {
     const names: Record<string, string> = {
       'gemini-3-flash-agent': 'Gemini 3.5 Flash (High)',
@@ -118,8 +118,8 @@ function manager() {
   };
 
   let accounts: any[] = [
-    { id: 'a0', email: 'a@example.com', quota: reading() },
-    { id: 'a1', email: 'b@example.com', quota: reading() },
+    { id: 'a0', email: 'a@example.com', quota: reading(extra) },
+    { id: 'a1', email: 'b@example.com', quota: reading(extra) },
   ];
   let retired: Record<string, unknown> = {};
   const store = {
@@ -158,6 +158,24 @@ test('retirement: every effort of the named model is withdrawn, each to the same
   }
   // Kept, so the next quota reading drops them again.
   assert.deepEqual(Object.keys(retired()).sort(), ['gemini-3-flash-agent', 'gemini-3.5-flash-low']);
+});
+
+test('retirement: a tiered model goes to the tiered successor, not the first effort listed', async () => {
+  // Named as the catalog stores them: a tiered model's name has no "(Tiered)",
+  // so there is no effort in it to match on.
+  const { subject } = manager({
+    'gemini-3.7-flash-tiered': 'Gemini 3.7 Flash',
+    'gemini-3.8-flash-high': 'Gemini 3.8 Flash (High)',
+    'gemini-3.8-flash-tiered': 'Gemini 3.8 Flash',
+  });
+
+  const successor = await subject.retireModel(
+    'gemini-3.7-flash-tiered',
+    'Gemini 3.7 Flash',
+    'Gemini 3.8 Flash',
+  );
+
+  assert.equal(successor, 'gemini-3.8-flash-tiered');
 });
 
 test('retirement: the request is sent again to the successor, once', async () => {

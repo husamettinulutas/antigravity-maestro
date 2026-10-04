@@ -38,6 +38,7 @@ const {
   LanguageModelThinkingPart,
   LanguageModelToolCallPart,
   LanguageModelToolResultPart,
+  testSettings,
 } = vscode;
 
 function message(role: number, content: unknown[]) {
@@ -443,7 +444,7 @@ function harness(...streams: unknown[]) {
       { report: (part: unknown) => shown.push(part) },
       { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) },
     );
-  return { sent, shown, sessions, run, provider };
+  return { sent, shown, sessions, run, provider, context };
 }
 
 /** The text Copilot Chat was shown, leaving out thinking and data parts. */
@@ -646,4 +647,83 @@ test('picker: a prompt is measured against the window it has to fit', () => {
   assert.equal(windowFill(370_000, 1_048_576)?.percent, 10);
   // A model that publishes no window cannot be measured against one.
   assert.equal(windowFill(370_000, 0), undefined);
+});
+
+// ── Thinking effort on the tiered models ──────────────────────────────────────
+
+const TIERED = {
+  id: 'gemini-3.8-flash-tiered',
+  maxInputTokens: 1_048_576,
+  maxOutputTokens: 65_536,
+  supportsThinking: true,
+  thinkingBudget: 10_000,
+};
+
+const ANSWER = [
+  { candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ text: 'hi' }] } }] },
+];
+
+const HELLO = [message(LanguageModelChatMessageRole.User, [new LanguageModelTextPart('hello')])];
+
+test('thinking effort: a tiered model thinks as much as the picker says', async () => {
+  const { sent, run, context } = harness(ANSWER, ANSWER, ANSWER);
+  context.model = TIERED;
+
+  await run(HELLO, { modelConfiguration: { thinkingEffort: 'low' } });
+  testSettings['copilot.thinkingEffort'] = 'medium';
+  try {
+    // Nothing chosen in the picker: the setting decides.
+    await run(HELLO);
+    // A choice in the picker still wins over the setting.
+    await run(HELLO, { modelConfiguration: { thinkingEffort: 'high' } });
+  } finally {
+    delete testSettings['copilot.thinkingEffort'];
+  }
+
+  // The budgets Claude Code's --effort gets on the same model.
+  assert.deepEqual(
+    sent.map((request) => request.generationConfig.thinkingConfig.thinkingBudget),
+    [1024, 4096, 10_000],
+  );
+});
+
+test('thinking effort: a model whose id names its effort keeps its own budget', async () => {
+  const { sent, run, context } = harness(ANSWER);
+  context.model = { ...TIERED, id: 'gemini-3.6-flash-high' };
+
+  await run(HELLO, { modelConfiguration: { thinkingEffort: 'low' } });
+
+  assert.equal(sent[0].generationConfig.thinkingConfig.thinkingBudget, 10_000);
+});
+
+test('thinking effort: only a tiered model offers the choice, opening on the setting', async () => {
+  const model = (id: string, supportsThinking: boolean) => ({
+    id,
+    displayName: id,
+    family: 'gemini',
+    maxInputTokens: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsThinking,
+    supportsImages: true,
+    supportsTools: true,
+  });
+  const models = [
+    model('gemini-3.8-flash-tiered', true),
+    model('gemini-3.8-flash-high', true),
+    model('gemini-3.1-flash-lite', false),
+  ];
+  const provider = new AntigravityChatProvider({ listAll: () => models, list: () => models }, {}, {});
+
+  testSettings['copilot.thinkingEffort'] = 'low';
+  try {
+    const offered = await provider.provideLanguageModelChatInformation({}, {});
+    const schemas = Object.fromEntries(
+      offered.map((info: any) => [info.id, info.configurationSchema]),
+    );
+    assert.equal(schemas['gemini-3.8-flash-tiered'].properties.thinkingEffort.default, 'low');
+    assert.equal(schemas['gemini-3.8-flash-high'], undefined);
+    assert.equal(schemas['gemini-3.1-flash-lite'], undefined);
+  } finally {
+    delete testSettings['copilot.thinkingEffort'];
+  }
 });

@@ -4,6 +4,7 @@ import { Logger } from '../utils/logger';
 import { Config } from '../utils/config';
 import { buildAuthUrl, exchangeCode, getUserInfo, refreshAccessToken } from '../auth/googleAuth';
 import { startLoopbackServer } from '../auth/loopbackServer';
+import { isTieredModel } from '../upstream/thinkingEffort';
 import { AccountStore } from './accountStore';
 import { fetchQuota, QuotaForbiddenError, QuotaUnauthorizedError } from './quotaService';
 import { QuotaHistory } from './quotaHistory';
@@ -399,6 +400,9 @@ function namedAs(model: ModelQuota, name: string): boolean {
 /**
  * The model a withdrawn one's requests go to: the named successor at the same
  * effort, else the one the Antigravity client lists first, else any of them.
+ *
+ * A tiered model's name carries no effort — each request picks its own — so
+ * its same-effort successor is the successor's tiered model.
  */
 function successorFor(
   retired: ModelQuota | undefined,
@@ -406,6 +410,13 @@ function successorFor(
   live: ModelQuota[],
 ): string | undefined {
   const named = live.filter((model) => namedAs(model, successorName));
+  const tiered =
+    retired && isTieredModel(retired.modelId)
+      ? named.find((model) => isTieredModel(model.modelId))
+      : undefined;
+  if (tiered) {
+    return tiered.modelId;
+  }
   const effort = retired?.displayName?.match(/\([^)]*\)\s*$/)?.[0];
   const sameEffort = effort
     ? named.find((model) => model.displayName?.trim().endsWith(effort))

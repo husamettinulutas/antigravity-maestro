@@ -14,7 +14,7 @@ import {
 import { sanitizeToolSchema } from '../protocol/schema';
 import { signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient, StreamBrokenError } from '../upstream/cloudCodeClient';
-import { applyGenerationConstraints } from '../upstream/constraints';
+import { applyGenerationConstraints, budgetForEffort } from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
@@ -26,11 +26,9 @@ import {
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
 import {
-  budgetForTier,
   isTieredModel,
   resolveThinkingEffort,
   thinkingEffortSchema,
-  withoutSplitEffortModels,
 } from '../upstream/thinkingEffort';
 import { Config } from '../utils/config';
 import { prefixedId } from '../utils/ids';
@@ -124,11 +122,13 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       return [];
     }
 
-    const all = this.catalog.listAll().filter((model) => model.family !== 'image');
-    const models = Config.hideSplitEffortModels() ? withoutSplitEffortModels(all) : all;
+    const models = this.catalog.listAll().filter((model) => model.family !== 'image');
     // The largest window on offer, so a model can say it is the smaller one.
     const widest = Math.max(0, ...models.map((model) => model.maxInputTokens));
     const onActive = new Set(this.catalog.list().map((model) => model.id));
+    const effortSchema = thinkingEffortSchema(
+      resolveThinkingEffort(undefined, Config.copilotThinkingEffort()),
+    );
 
     return models.map((model) => ({
       id: model.id,
@@ -147,10 +147,14 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         toolCalling: model.supportsTools,
       },
       // `*-tiered` models get a Low/Medium/High choice right in the picker.
-      // `configurationSchema` is a newer VS Code API; hosts that do not know
-      // it ignore the extra field.
+      // `configurationSchema` belongs to VS Code's proposed chatProvider API,
+      // and the host passes it through without the extension enabling the
+      // proposal; hosts that do not know it ignore the field, and the setting
+      // decides. Enabling the proposal in package.json is what would break:
+      // vsce refuses to publish an extension that declares one, and VS Code
+      // logs an error for it on every start.
       ...(isTieredModel(model.id) && model.supportsThinking
-        ? { configurationSchema: thinkingEffortSchema(resolveThinkingEffort(undefined, Config.thinkingEffort())) }
+        ? { configurationSchema: effortSchema }
         : {}),
     }));
   }
@@ -441,9 +445,9 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     if (isTieredModel(context.model.id) && context.model.supportsThinking) {
       const effort = resolveThinkingEffort(
         (options as { modelConfiguration?: { [key: string]: any } }).modelConfiguration,
-        Config.thinkingEffort(),
+        Config.copilotThinkingEffort(),
       );
-      thinkingBudget = budgetForTier(effort, context.model.thinkingBudget);
+      thinkingBudget = budgetForEffort(effort, context.model.id, context.model.thinkingBudget);
       Logger.info(`Thinking effort for ${context.model.id}: ${effort} (budget ${thinkingBudget})`);
     }
 
