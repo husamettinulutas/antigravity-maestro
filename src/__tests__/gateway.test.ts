@@ -68,7 +68,7 @@ async function gateway(...replies: unknown[][]) {
     });
     return { status: response.status, text: await response.text() };
   };
-  return { sent, sessions, post, stop: () => server.stop() };
+  return { sent, sessions, post, context, stop: () => server.stop() };
 }
 
 const MESSAGES = { model: 'gemini-3-flash', max_tokens: 100, messages: [{ role: 'user', content: 'hi' }] };
@@ -147,6 +147,40 @@ test('gateway: the conversation a client names reaches the lease', async () => {
     await post('/v1/responses', { model: 'gemini-3-flash', input: 'hi', prompt_cache_key: 'codex-1' });
 
     assert.deepEqual(sessions, ['gateway:cc-1', 'gateway:user_x_session_cc-2', 'gateway:codex-1']);
+  } finally {
+    await stop();
+  }
+});
+
+test("gateway: Codex's reasoning effort sets the thinking budget", async () => {
+  const { sent, post, context, stop } = await gateway(ANSWER, ANSWER, ANSWER, ANSWER, ANSWER);
+  context.model = {
+    id: 'gemini-3.8-flash-tiered',
+    maxInputTokens: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsThinking: true,
+    thinkingBudget: 10_000,
+  };
+  const responses = (reasoning?: { effort: string }) =>
+    post('/v1/responses', { model: 'gemini-3.8-flash-tiered', input: 'hi', reasoning });
+  try {
+    await responses({ effort: 'low' });
+    // Below low still thinks a little: a budget of 0 would let it think freely.
+    await responses({ effort: 'minimal' });
+    await responses({ effort: 'none' });
+    // No effort asked for: the model's full budget, as before.
+    await responses();
+    // Chat Completions clients name it differently.
+    await post('/v1/chat/completions', {
+      model: 'gemini-3.8-flash-tiered',
+      messages: [{ role: 'user', content: 'hi' }],
+      reasoning_effort: 'medium',
+    });
+
+    assert.deepEqual(
+      sent.map((request) => request.generationConfig.thinkingConfig.thinkingBudget),
+      [1024, 1024, 1024, 10_000, 4096],
+    );
   } finally {
     await stop();
   }

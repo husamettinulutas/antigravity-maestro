@@ -293,7 +293,11 @@ export class GatewayServer {
 
     try {
       await this.deps.lease.run(body.model, async (context) => {
-        const request = this.tuneRequest(responsesToGemini(body, context.model.id, context.model.supportsThinking), context);
+        const request = this.tuneRequest(
+          responsesToGemini(body, context.model.id, context.model.supportsThinking),
+          context,
+          body.reasoning?.effort,
+        );
         Logger.info(
           `Responses request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
         );
@@ -336,7 +340,11 @@ export class GatewayServer {
 
     try {
       await this.deps.lease.run(body.model, async (context) => {
-        const request = this.tuneRequest(chatToGemini(body, context.model.id, context.model.supportsThinking), context);
+        const request = this.tuneRequest(
+          chatToGemini(body, context.model.id, context.model.supportsThinking),
+          context,
+          body.reasoning_effort,
+        );
         Logger.info(
           `Chat request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
         );
@@ -362,13 +370,18 @@ export class GatewayServer {
     }
   }
 
-  /** Apply the account's model limits to a converted request. */
-  private tuneRequest(request: GeminiRequest, context: LeaseContext): GeminiRequest {
+  /**
+   * Apply the account's model limits to a converted request, thinking as hard
+   * as the client's reasoning effort asks: Codex sends `reasoning.effort`,
+   * Chat Completions clients `reasoning_effort`. Without one the model keeps
+   * its full budget.
+   */
+  private tuneRequest(request: GeminiRequest, context: LeaseContext, effort?: string): GeminiRequest {
     request.generationConfig = request.generationConfig ?? {};
     if (context.model.supportsThinking) {
       request.generationConfig.thinkingConfig = {
         includeThoughts: true,
-        thinkingBudget: context.model.thinkingBudget,
+        thinkingBudget: budgetForEffort(effort, context.model.id, context.model.thinkingBudget),
       };
     } else {
       delete request.generationConfig.thinkingConfig;

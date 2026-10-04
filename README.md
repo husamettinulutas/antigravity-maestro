@@ -113,8 +113,8 @@ actually serves that account.
 The `*-tiered` Gemini Flash models are the exception: one id whose effort each request chooses.
 Copilot's model picker offers a **Thinking Effort** control for them where VS Code supports it —
 Low, Medium or High, about 1K or 4K tokens of thinking or the model's full budget — and
-`antigravityMaestro.copilot.thinkingEffort` sets the default. Claude Code sets it with its own
-`--effort`.
+`antigravityMaestro.copilot.thinkingEffort` sets the default. Claude Code's `--effort` and Codex's
+`model_reasoning_effort` set the same budgets, on every model that thinks.
 
 Each model in Copilot's picker shows the size of its context window, because the windows differ by
 an order of magnitude — around 1M tokens for the Gemini models against 200K for the Claude ones.

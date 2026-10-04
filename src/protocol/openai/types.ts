@@ -81,6 +81,7 @@ export interface ChatCompletionsRequest {
   stop?: string | string[];
   stream?: boolean;
   stream_options?: { include_usage?: boolean };
+  reasoning_effort?: string;
 }
 
 /** Map a Gemini finishReason onto an OpenAI finish_reason. */

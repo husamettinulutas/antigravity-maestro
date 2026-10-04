@@ -74,12 +74,17 @@ export function applyGenerationConstraints(
 
 /**
  * The thinking budget for a client that asks for an effort rather than a
- * number — Claude Code sends `output_config.effort` with adaptive thinking.
+ * number — Claude Code sends `output_config.effort` with adaptive thinking,
+ * Codex sends `reasoning.effort`, and Copilot's picker a Thinking Effort.
  *
  * `ceiling` is the model's own budget, and no effort goes past it: the top
  * efforts get all of it, the lower ones a share, so a low-effort title or
  * quick question stops paying for ten thousand tokens of reasoning. Gemini's
  * shares follow the upstream's own Flash tiers (1k / 4k / 10k).
+ *
+ * Codex can ask for less than low (`minimal`, `none`), and gets low's share:
+ * a budget of 0 drops the thinking config, and the model then thinks as much
+ * as it likes.
  */
 export function budgetForEffort(
   effort: string | undefined,
@@ -90,7 +95,9 @@ export function budgetForEffort(
   const share: Record<string, number> = claude
     ? { low: 4096, medium: 8192, high: 16_384, xhigh: 24_576 }
     : { low: 1024, medium: 4096 };
-  const budget = effort ? share[effort] : undefined;
+  const level = effort?.trim().toLowerCase();
+  const key = level === 'minimal' || level === 'none' ? 'low' : level;
+  const budget = key && Object.hasOwn(share, key) ? share[key] : undefined;
   return budget === undefined ? ceiling : Math.min(budget, ceiling);
 }
 

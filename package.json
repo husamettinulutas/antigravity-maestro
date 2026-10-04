@@ -269,7 +269,7 @@
             "high"
           ],
           "default": "high",
-          "description": "Thinking effort for the Gemini Flash models whose id ends in -tiered, in Copilot Chat. The Thinking Effort control in the model picker overrides it where your VS Code shows one. Claude Code follows its own --effort instead.",
+          "description": "Thinking effort for the Gemini Flash models whose id ends in -tiered, in Copilot Chat. The Thinking Effort control in the model picker overrides it where your VS Code shows one. Claude Code and Codex follow their own effort settings instead.",
           "enumDescriptions": [
             "About 1K tokens of thinking",
             "About 4K tokens of thinking",
