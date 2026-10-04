@@ -15,8 +15,12 @@
 - **Codex's reasoning effort sets the thinking budget.** The gateway ignored
   it, so every Codex request paid for the model's full budget. Low and
   medium now think less, the same as Claude Code's `--effort`, and minimal
-  and none get low's share. Applying the Codex integration still writes
-  `high`, so nothing changes until you lower it.
+  and none get low's share. Codex only sends its effort to models it knows
+  as OpenAI ones, so applying the Codex integration now also writes
+  `model_supports_reasoning_summaries = true`; without it the effort and the
+  reasoning summary request never left Codex. Apply the model in Codex again
+  to pick this up. The integration still writes `high`, so nothing changes
+  until you lower it.
 - **The model is told the effort it runs at.** Every client sends its effort
   as a request field, and it only ever became a thinking budget, so asked
   about it, Gemini guessed: "default/medium" with Claude Code on Max, while

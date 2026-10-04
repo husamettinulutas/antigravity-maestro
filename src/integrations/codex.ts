@@ -30,6 +30,7 @@ const MANAGED_TOP_LEVEL_KEYS = [
   'show_raw_agent_reasoning',
   'model_reasoning_effort',
   'model_reasoning_summary',
+  'model_supports_reasoning_summaries',
 ] as const;
 
 interface CodexSnapshot {
@@ -151,11 +152,15 @@ export class CodexIntegration implements AgentIntegration {
       content.trim() === '' ? `${section}\n` : `${content.replace(/\n*$/, '\n')}\n${section}\n`;
 
     // 3) Top-level keys must come before any [section] header, and are only
-    //    honoured in the user-level config.
+    //    honoured in the user-level config. Codex sends `reasoning` — the
+    //    effort and the summary request — only to OpenAI models it knows,
+    //    unless told the model supports it; without that the effort below
+    //    never left Codex, and every request ran at the full budget.
     const reasoningLines =
       options.maxOutputTokens === 0
         ? ''
-        : 'show_raw_agent_reasoning = true\nmodel_reasoning_effort = "high"\nmodel_reasoning_summary = "auto"\n';
+        : 'show_raw_agent_reasoning = true\nmodel_reasoning_effort = "high"\nmodel_reasoning_summary = "auto"\n' +
+          'model_supports_reasoning_summaries = true\n';
 
     content =
       `model = "${tomlEscape(modelId)}"\n` +
