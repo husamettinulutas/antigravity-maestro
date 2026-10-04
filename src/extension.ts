@@ -198,6 +198,10 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('antigravityMaestro.quota.autoRefreshMinutes')) {
         accounts.startAutoRefresh();
       }
+      // The setting is the default the picker's Thinking Effort control opens on.
+      if (event.affectsConfiguration('antigravityMaestro.copilot.thinkingEffort')) {
+        chatProvider.refresh();
+      }
       if (event.affectsConfiguration(UTILITY_SMALL_SETTING)) {
         void accountsView.postState();
       }

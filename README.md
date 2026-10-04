@@ -110,6 +110,12 @@ gemini-3-flash           gemini-3.5-flash-low       gpt-oss-120b-medium
 The authoritative list comes from each account's own quota response, so it reflects what Google
 actually serves that account.
 
+The `*-tiered` Gemini Flash models are the exception: one id whose effort each request chooses.
+Copilot's model picker offers a **Thinking Effort** control for them where VS Code supports it —
+Low, Medium or High, about 1K or 4K tokens of thinking or the model's full budget — and
+`antigravityMaestro.copilot.thinkingEffort` sets the default. Claude Code sets it with its own
+`--effort`.
+
 Each model in Copilot's picker shows the size of its context window, because the windows differ by
 an order of magnitude — around 1M tokens for the Gemini models against 200K for the Claude ones.
 Switching a long conversation to a smaller window makes Copilot Chat compact it first ("Compacting
@@ -152,6 +158,7 @@ Copilot Chat does not use the gateway; those requests never leave the extension 
 | `antigravityMaestro.quota.autoRefreshMinutes` | `10` | Background quota refresh (`0` disables it). |
 | `antigravityMaestro.upstreamProxyUrl` | `""` | HTTP(S) proxy for all Google traffic. |
 | `antigravityMaestro.oauth.clientId` / `.clientSecret` | `""` | Sign in with your own approved OAuth client. |
+| `antigravityMaestro.copilot.thinkingEffort` | `high` | Thinking effort for the `*-tiered` Gemini Flash models in Copilot Chat, where the model picker does not offer the choice itself. |
 | `antigravityMaestro.claudeCode.settingsScope` | `user` | Write `~/.claude/settings.json` or the workspace's `.claude/settings.local.json`. |
 | `antigravityMaestro.claudeCode.smallFastModel` | `""` | Cheaper model for Claude Code's background tasks. |
 | `antigravityMaestro.codex.configPath` | `""` | Alternative `config.toml` path. |

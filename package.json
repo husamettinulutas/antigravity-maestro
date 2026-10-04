@@ -2,7 +2,7 @@
   "name": "antigravity-maestro",
   "displayName": "Antigravity Maestro",
   "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "publisher": "husamettinulutas",
   "author": {
     "name": "Hüsamettin Ulutaş",
@@ -260,6 +260,21 @@
           "type": "string",
           "default": "",
           "description": "Override the built-in Google OAuth client secret. Only used together with antigravityMaestro.oauth.clientId."
+        },
+        "antigravityMaestro.copilot.thinkingEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "high",
+          "description": "Thinking effort for the Gemini Flash models whose id ends in -tiered, in Copilot Chat. The Thinking Effort control in the model picker overrides it where your VS Code shows one. Claude Code follows its own --effort instead.",
+          "enumDescriptions": [
+            "About 1K tokens of thinking",
+            "About 4K tokens of thinking",
+            "The model's full thinking budget"
+          ]
         },
         "antigravityMaestro.claudeCode.settingsScope": {
           "type": "string",
