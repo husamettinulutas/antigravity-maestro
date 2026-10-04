@@ -685,6 +685,10 @@ test('thinking effort: a tiered model thinks as much as the picker says', async 
     sent.map((request) => request.generationConfig.thinkingConfig.thinkingBudget),
     [1024, 4096, 10_000],
   );
+  // And the model is told which one it runs at.
+  assert.deepEqual(sent[0].systemInstruction.parts, [
+    { text: 'Reasoning effort for this request: low (thinking budget: 1024 tokens).' },
+  ]);
 });
 
 test('thinking effort: a model whose id names its effort keeps its own budget', async () => {

@@ -185,3 +185,34 @@ test("gateway: Codex's reasoning effort sets the thinking budget", async () => {
     await stop();
   }
 });
+
+test('gateway: the model is told the effort Claude Code asked for', async () => {
+  const { sent, post, context, stop } = await gateway(ANSWER, ANSWER, ANSWER);
+  context.model = {
+    id: 'gemini-3.8-flash-tiered',
+    maxInputTokens: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsThinking: true,
+    thinkingBudget: 10_000,
+  };
+  const ask = (extra: Record<string, unknown>) =>
+    post('/v1/messages', { ...MESSAGES, model: 'gemini-3.8-flash-tiered', system: 'Be brief.', ...extra });
+  try {
+    // What Claude Code sends for Max: adaptive thinking, the effort as a field.
+    await ask({ thinking: { type: 'adaptive' }, output_config: { effort: 'max' } });
+    await ask({ thinking: { type: 'adaptive' }, output_config: { effort: 'low' } });
+    // No effort named: nothing to tell.
+    await ask({});
+
+    const parts = sent.map((request) => request.systemInstruction.parts.map((part: any) => part.text));
+    // The client's prompt stays first, so its cached prefix is unchanged.
+    assert.deepEqual(parts[0], [
+      'Be brief.',
+      'Reasoning effort for this request: max (thinking budget: 10000 tokens).',
+    ]);
+    assert.equal(parts[1][1], 'Reasoning effort for this request: low (thinking budget: 1024 tokens).');
+    assert.deepEqual(parts[2], ['Be brief.']);
+  } finally {
+    await stop();
+  }
+});

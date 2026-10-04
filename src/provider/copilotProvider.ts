@@ -14,7 +14,7 @@ import {
 import { sanitizeToolSchema } from '../protocol/schema';
 import { signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient, StreamBrokenError } from '../upstream/cloudCodeClient';
-import { applyGenerationConstraints, budgetForEffort } from '../upstream/constraints';
+import { applyGenerationConstraints, budgetForEffort, noteEffort } from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
@@ -442,8 +442,9 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     const tools = buildTools(options);
 
     let thinkingBudget = context.model.thinkingBudget;
+    let effort: string | undefined;
     if (isTieredModel(context.model.id) && context.model.supportsThinking) {
-      const effort = resolveThinkingEffort(
+      effort = resolveThinkingEffort(
         (options as { modelConfiguration?: { [key: string]: any } }).modelConfiguration,
         Config.copilotThinkingEffort(),
       );
@@ -474,6 +475,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       maxOutputTokens: context.model.maxOutputTokens,
       thinkingBudget,
     });
+    noteEffort(request, effort);
 
     return pruneUndefined(request);
   }

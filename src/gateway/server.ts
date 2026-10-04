@@ -10,7 +10,12 @@ import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/responsesStream';
 import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
 import { CloudCodeClient, StreamBrokenError, UpstreamError } from '../upstream/cloudCodeClient';
-import { applyGenerationConstraints, budgetForEffort } from '../upstream/constraints';
+import {
+  applyGenerationConstraints,
+  budgetForEffort,
+  describeThinking,
+  noteEffort,
+} from '../upstream/constraints';
 import {
   EmptyResponseError,
   EmptyResponseWatch,
@@ -204,7 +209,8 @@ export class GatewayServer {
       await this.deps.lease.run(body.model, async (context) => {
         const request = this.prepareAnthropicRequest(body, context);
         Logger.info(
-          `Anthropic request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
+          `Anthropic request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}, ` +
+            describeThinking(request, body.output_config?.effort),
         );
 
         if (body.stream) {
@@ -264,6 +270,7 @@ export class GatewayServer {
       maxOutputTokens: context.model.maxOutputTokens,
       thinkingBudget: context.model.thinkingBudget,
     });
+    noteEffort(request, requestedEffort);
     return request;
   }
 
@@ -299,7 +306,8 @@ export class GatewayServer {
           body.reasoning?.effort,
         );
         Logger.info(
-          `Responses request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
+          `Responses request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}, ` +
+            describeThinking(request, body.reasoning?.effort),
         );
 
         if (body.stream) {
@@ -346,7 +354,8 @@ export class GatewayServer {
           body.reasoning_effort,
         );
         Logger.info(
-          `Chat request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}`,
+          `Chat request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}, ` +
+            describeThinking(request, body.reasoning_effort),
         );
 
         if (body.stream) {
@@ -391,6 +400,7 @@ export class GatewayServer {
       maxOutputTokens: context.model.maxOutputTokens,
       thinkingBudget: context.model.thinkingBudget,
     });
+    noteEffort(request, effort);
     return request;
   }
 

@@ -1,4 +1,4 @@
-import { GenerationConfig } from '../protocol/gemini';
+import { GeminiRequest, GenerationConfig } from '../protocol/gemini';
 
 export interface ModelLimits {
   maxOutputTokens: number;
@@ -99,6 +99,35 @@ export function budgetForEffort(
   const key = level === 'minimal' || level === 'none' ? 'low' : level;
   const budget = key && Object.hasOwn(share, key) ? share[key] : undefined;
   return budget === undefined ? ceiling : Math.min(budget, ceiling);
+}
+
+/**
+ * Tell the model the effort it runs at.
+ *
+ * Every client sends its effort as a request field, and it becomes a thinking
+ * budget — a number the model never sees. On Anthropic's API a Claude model is
+ * told its effort by the API itself; nothing tells the models served here, so
+ * asked about it, Gemini guessed ("default/medium" under Max) while it could
+ * name Ultracode, which Claude Code sends as text. One line at the end of the
+ * system instruction, after the client's own prompt, so the cached prefix
+ * stays the same. Call it after the budget is final.
+ */
+export function noteEffort(request: GeminiRequest, effort: string | undefined): void {
+  const level = effort?.trim().toLowerCase();
+  const budget = request.generationConfig?.thinkingConfig?.thinkingBudget;
+  if (!level || typeof budget !== 'number') {
+    return;
+  }
+  const note = `Reasoning effort for this request: ${level} (thinking budget: ${budget} tokens).`;
+  request.systemInstruction = {
+    parts: [...(request.systemInstruction?.parts ?? []), { text: note }],
+  };
+}
+
+/** How a request will think, for the per-request log line. */
+export function describeThinking(request: GeminiRequest, effort: string | undefined): string {
+  const budget = request.generationConfig?.thinkingConfig?.thinkingBudget;
+  return `effort=${effort ?? '-'}, thinking=${typeof budget === 'number' ? budget : 'off'}`;
 }
 
 function budgetForThinkingLevel(level: string): number | undefined {

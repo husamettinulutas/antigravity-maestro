@@ -17,6 +17,12 @@
   medium now think less, the same as Claude Code's `--effort`, and minimal
   and none get low's share. Applying the Codex integration still writes
   `high`, so nothing changes until you lower it.
+- **The model is told the effort it runs at.** Every client sends its effort
+  as a request field, and it only ever became a thinking budget, so asked
+  about it, Gemini guessed: "default/medium" with Claude Code on Max, while
+  it could name Ultracode, which arrives as text. A one-line note at the end
+  of the system prompt now names the effort and its budget. The gateway's
+  request log shows them too (`effort=max, thinking=10000`).
 
 ## 1.0.18
 
