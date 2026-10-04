@@ -198,6 +198,12 @@ export function activate(context: vscode.ExtensionContext): void {
       if (event.affectsConfiguration('antigravityMaestro.quota.autoRefreshMinutes')) {
         accounts.startAutoRefresh();
       }
+      if (
+        event.affectsConfiguration('antigravityMaestro.copilot.hideSplitEffortModels') ||
+        event.affectsConfiguration('antigravityMaestro.thinkingEffort')
+      ) {
+        chatProvider.refresh();
+      }
       if (event.affectsConfiguration(UTILITY_SMALL_SETTING)) {
         void accountsView.postState();
       }

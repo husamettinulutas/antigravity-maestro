@@ -2,7 +2,7 @@
   "name": "antigravity-maestro",
   "displayName": "Antigravity Maestro",
   "description": "Sign in with multiple Google accounts and run Antigravity's models (Gemini 3.x, Claude 4.6, GPT-OSS) in Copilot Chat, Claude Code and Codex. See per-account quotas, switch accounts, and rotate automatically when limits run out.",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "publisher": "husamettinulutas",
   "author": {
     "name": "Hüsamettin Ulutaş",
@@ -45,6 +45,9 @@
   ],
   "main": "./dist/extension.js",
   "type": "commonjs",
+  "enabledApiProposals": [
+    "chatProvider"
+  ],
   "contributes": {
     "languageModelChatProviders": [
       {
@@ -190,6 +193,21 @@
           "minimum": 1024,
           "maximum": 65535,
           "description": "Preferred port for the local gateway that Claude Code and Codex talk to. If it is busy, the next free port is used instead. The gateway only binds to 127.0.0.1."
+        },
+        "antigravityMaestro.thinkingEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "high",
+          "description": "Default thinking effort for the Gemini Flash (Tiered) models in Copilot Chat. The Thinking Effort control in the model picker takes precedence when your VS Code version shows it."
+        },
+        "antigravityMaestro.copilot.hideSplitEffortModels": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide the Low / Medium / High variants (for example \"Gemini 3.8 Flash (High)\") from the Copilot Chat model picker when the same model is also offered with a Thinking Effort control. Models without such a replacement (Gemini Pro, Claude, ...) are never hidden."
         },
         "antigravityMaestro.gateway.autoStart": {
           "type": "boolean",

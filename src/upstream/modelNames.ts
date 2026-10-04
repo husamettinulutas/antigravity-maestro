@@ -43,6 +43,21 @@ export function displayNamesFor(
     }
     names[model.modelId] = displayNameFor(model.modelId) ?? label ?? model.modelId;
   }
+
+  // "Gemini 3.8 Flash (Tiered)" → "Gemini 3.8 Flash": the effort is picked in
+  // the model picker. Kept as is if that would make two models share a name.
+  for (const model of models) {
+    if (!/-tiered$/i.test(model.modelId)) {
+      continue;
+    }
+    const stripped = names[model.modelId].replace(/\s*\(tiered\)\s*$/i, '').trim();
+    const taken = Object.entries(names).some(
+      ([id, name]) => id !== model.modelId && name === stripped,
+    );
+    if (stripped !== '' && !taken) {
+      names[model.modelId] = stripped;
+    }
+  }
   return names;
 }
 
@@ -54,7 +69,8 @@ const MODES: Record<string, string> = {
   low: 'Low',
   'extra-low': 'Extra low',
   minimal: 'Minimal',
-  tiered: 'Tiered',
+  // The effort of a tiered model is chosen in the picker, so it is not part of the name.
+  tiered: '',
   agent: 'Agent',
 };
 

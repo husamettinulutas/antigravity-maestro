@@ -7,7 +7,7 @@ test('model names are built from the id, not the upstream label', () => {
   // The ids the upstream actually serves — several of them come back sharing
   // one stale display name, which is what made the model list unreadable.
   assert.equal(displayNameFor('gemini-3.5-flash-high'), 'Gemini 3.5 Flash (High)');
-  assert.equal(displayNameFor('gemini-3.7-flash-tiered'), 'Gemini 3.7 Flash (Tiered)');
+  assert.equal(displayNameFor('gemini-3.7-flash-tiered'), 'Gemini 3.7 Flash');
   assert.equal(displayNameFor('gemini-3.5-flash-extra-low'), 'Gemini 3.5 Flash (Extra low)');
   assert.equal(displayNameFor('gemini-3-flash-agent'), 'Gemini 3 Flash (Agent)');
   assert.equal(displayNameFor('gemini-3.1-flash-lite'), 'Gemini 3.1 Flash Lite');
@@ -82,4 +82,13 @@ test('empty or whitespace displayName falls back to modelId when unrecognisable'
   ]);
   assert.equal(names['models/'], 'models/');
   assert.equal(names[''], '');
+});
+
+test('the upstream\'s "(Tiered)" label is dropped from the name', () => {
+  const names = displayNamesFor([
+    { modelId: 'gemini-3.8-flash-tiered', displayName: 'Gemini 3.8 Flash (Tiered)' },
+    { modelId: 'gemini-3.8-flash-high', displayName: 'Gemini 3.8 Flash (High)' },
+  ]);
+  assert.equal(names['gemini-3.8-flash-tiered'], 'Gemini 3.8 Flash');
+  assert.equal(names['gemini-3.8-flash-high'], 'Gemini 3.8 Flash (High)');
 });

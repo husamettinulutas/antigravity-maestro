@@ -25,6 +25,14 @@ import {
   retryAfter,
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
+import {
+  budgetForTier,
+  isTieredModel,
+  resolveThinkingEffort,
+  thinkingEffortSchema,
+  withoutSplitEffortModels,
+} from '../upstream/thinkingEffort';
+import { Config } from '../utils/config';
 import { prefixedId } from '../utils/ids';
 import { Logger } from '../utils/logger';
 
@@ -116,7 +124,8 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       return [];
     }
 
-    const models = this.catalog.listAll().filter((model) => model.family !== 'image');
+    const all = this.catalog.listAll().filter((model) => model.family !== 'image');
+    const models = Config.hideSplitEffortModels() ? withoutSplitEffortModels(all) : all;
     // The largest window on offer, so a model can say it is the smaller one.
     const widest = Math.max(0, ...models.map((model) => model.maxInputTokens));
     const onActive = new Set(this.catalog.list().map((model) => model.id));
@@ -137,6 +146,12 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
         imageInput: model.supportsImages,
         toolCalling: model.supportsTools,
       },
+      // `*-tiered` models get a Low/Medium/High choice right in the picker.
+      // `configurationSchema` is a newer VS Code API; hosts that do not know
+      // it ignore the extra field.
+      ...(isTieredModel(model.id) && model.supportsThinking
+        ? { configurationSchema: thinkingEffortSchema(resolveThinkingEffort(undefined, Config.thinkingEffort())) }
+        : {}),
     }));
   }
 
@@ -422,13 +437,23 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     );
     const tools = buildTools(options);
 
+    let thinkingBudget = context.model.thinkingBudget;
+    if (isTieredModel(context.model.id) && context.model.supportsThinking) {
+      const effort = resolveThinkingEffort(
+        (options as { modelConfiguration?: { [key: string]: any } }).modelConfiguration,
+        Config.thinkingEffort(),
+      );
+      thinkingBudget = budgetForTier(effort, context.model.thinkingBudget);
+      Logger.info(`Thinking effort for ${context.model.id}: ${effort} (budget ${thinkingBudget})`);
+    }
+
     const request: GeminiRequest = {
       contents,
       safetySettings: [...SAFETY_SETTINGS],
       generationConfig: {
         maxOutputTokens: model.maxOutputTokens,
         thinkingConfig: context.model.supportsThinking
-          ? { includeThoughts: true, thinkingBudget: context.model.thinkingBudget }
+          ? { includeThoughts: true, thinkingBudget }
           : undefined,
       },
     };
@@ -443,7 +468,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
 
     applyGenerationConstraints(request.generationConfig!, context.model.id, {
       maxOutputTokens: context.model.maxOutputTokens,
-      thinkingBudget: context.model.thinkingBudget,
+      thinkingBudget,
     });
 
     return pruneUndefined(request);
