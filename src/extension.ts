@@ -735,7 +735,7 @@ async function pickBackgroundModel(
       .map((model) => ({
         label: model.displayName,
         description: model.id,
-        detail: `${describeQuota(onActive.get(model.id))} · ${Math.round(model.maxInputTokens / 1000)}K context`,
+        detail: `${describeQuota(onActive.get(model.id), model)} · ${Math.round(model.maxInputTokens / 1000)}K context`,
         id: model.id,
       })),
   ];
@@ -822,7 +822,7 @@ async function pickModel(
     models.map((model) => ({
       label: model.displayName,
       description: model.id,
-      detail: `${describeQuota(onActive.get(model.id))} · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
+      detail: `${describeQuota(onActive.get(model.id), model)} · ${Math.round(model.maxInputTokens / 1000)}K context · ${model.supportsThinking ? 'thinking' : 'no thinking'}`,
       model,
     })),
     { placeHolder, matchOnDescription: true, matchOnDetail: true },
@@ -834,10 +834,17 @@ async function pickModel(
 /**
  * What is left on the account the request will run on, and nothing else — a
  * second account's number next to it read as the quota for the model being
- * picked, which is the confusion this line exists to avoid.
+ * picked, which is the confusion this line exists to avoid. A model the active
+ * account lacks names the account that has it instead, since that is where its
+ * requests will go.
  */
-function describeQuota(onActive: CatalogModel | undefined): string {
-  return onActive ? `${onActive.quotaPercent ?? 0}% quota left` : 'not on the active account';
+function describeQuota(onActive: CatalogModel | undefined, offered: CatalogModel): string {
+  if (onActive) {
+    return `${onActive.quotaPercent ?? 0}% quota left`;
+  }
+  return offered.accountEmail
+    ? `not on the active account — on ${offered.accountEmail}`
+    : 'not on the active account';
 }
 
 async function pickAccount(

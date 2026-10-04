@@ -1,4 +1,4 @@
-import { CatalogModel, ModelCatalog } from '../upstream/modelCatalog';
+import { CatalogModel, MATCH_KINDS, MatchKind, ModelCatalog } from '../upstream/modelCatalog';
 import { UpstreamError } from '../upstream/cloudCodeClient';
 import { UsageMetadata } from '../protocol/gemini';
 import { Config } from '../utils/config';
@@ -102,6 +102,8 @@ interface AccountSummary {
   total: number;
   needsReauth: number;
   noCatalog: number;
+  /** Signed in and read, but another account has the model itself. */
+  notOffered: number;
   coolingDown: number;
   /** Cooling down because the upstream refused the account (403). */
   refused: number;
@@ -199,7 +201,7 @@ export class AccountLease {
     const bound = session ? this.sessions.get(session)?.accountId : undefined;
 
     for (const account of candidates) {
-      const model = this.catalog.resolve(requestedModel, account.id);
+      const model = this.modelFor(account, requestedModel);
       if (!model) {
         Logger.debug(`${account.email} has no model matching '${requestedModel}'`);
         continue;
@@ -456,7 +458,7 @@ export class AccountLease {
       if (account.needsReauth) {
         continue;
       }
-      const model = this.catalog.resolve(requestedModel, account.id);
+      const model = this.modelFor(account, requestedModel);
       if (!model) {
         continue;
       }
@@ -480,6 +482,7 @@ export class AccountLease {
       total: 0,
       needsReauth: 0,
       noCatalog: 0,
+      notOffered: 0,
       coolingDown: 0,
       refused: 0,
     };
@@ -489,9 +492,13 @@ export class AccountLease {
         summary.needsReauth += 1;
         continue;
       }
-      const model = this.catalog.resolve(requestedModel, account.id);
+      const model = this.modelFor(account, requestedModel);
       if (!model) {
-        summary.noCatalog += 1;
+        if (this.catalog.resolveMatch(requestedModel, account.id)) {
+          summary.notOffered += 1;
+        } else {
+          summary.noCatalog += 1;
+        }
         continue;
       }
       if (this.cooldownSeconds(account.id, model.id) === 0) {
@@ -516,7 +523,7 @@ export class AccountLease {
       .list()
       .filter((account) => !account.needsReauth)
       .map((account) => {
-        const model = this.catalog.resolve(requestedModel, account.id);
+        const model = this.modelFor(account, requestedModel);
         return model ? this.cooldownSeconds(account.id, model.id) : 0;
       })
       .filter((seconds) => seconds > 0);
@@ -631,12 +638,55 @@ export class AccountLease {
     }
   }
 
+  /**
+   * The model this account would serve for the request, or undefined when
+   * another account has something closer to what was asked for.
+   *
+   * Accounts on different plans are offered different models, and every
+   * account resolves a Claude id to *some* Claude model. Taken on its own that
+   * sent a request for Opus 5.5 to Opus 4.6 on the active account while
+   * another account had 5.5 itself — the picker said one model and a different
+   * one answered. Only the accounts with the closest match stay in the
+   * running, so the request moves to the account that has the model; a
+   * stand-in is used only when no account has anything closer.
+   *
+   * Accounts that need signing in still count towards the closest match: a
+   * model only they offer is reported as needing that sign-in, not quietly
+   * swapped for another one.
+   */
+  private modelFor(account: AccountMetadata, requestedModel: string): CatalogModel | undefined {
+    const match = this.catalog.resolveMatch(requestedModel, account.id);
+    if (!match) {
+      return undefined;
+    }
+    if (match.kind === 'exact') {
+      return match.model;
+    }
+    return match.kind === this.closestMatch(requestedModel) ? match.model : undefined;
+  }
+
+  /** The closest match any account has for the request. */
+  private closestMatch(requestedModel: string): MatchKind | undefined {
+    let closest: number | undefined;
+    for (const account of this.accounts.list()) {
+      const kind = this.catalog.resolveMatch(requestedModel, account.id)?.kind;
+      if (kind === undefined) {
+        continue;
+      }
+      const rank = MATCH_KINDS.indexOf(kind);
+      if (closest === undefined || rank < closest) {
+        closest = rank;
+      }
+    }
+    return closest === undefined ? undefined : MATCH_KINDS[closest];
+  }
+
   /** True when the account can serve the model right now. */
   private isUsable(account: AccountMetadata, requestedModel: string): boolean {
     if (account.needsReauth) {
       return false;
     }
-    const model = this.catalog.resolve(requestedModel, account.id);
+    const model = this.modelFor(account, requestedModel);
     return model ? this.cooldownSeconds(account.id, model.id) === 0 : false;
   }
 
@@ -651,12 +701,12 @@ export class AccountLease {
 
   /** False only when the account's quota for this model is known to be spent. */
   private hasHeadroom(account: AccountMetadata, requestedModel: string): boolean {
-    const percent = this.catalog.resolve(requestedModel, account.id)?.quotaPercent;
+    const percent = this.modelFor(account, requestedModel)?.quotaPercent;
     return percent === undefined || percent > 0;
   }
 
   private quotaOf(account: AccountMetadata, requestedModel: string): number {
-    const model = this.catalog.resolve(requestedModel, account.id);
+    const model = this.modelFor(account, requestedModel);
     return model?.quotaPercent ?? 0;
   }
 
@@ -679,6 +729,26 @@ export class AccountLease {
     }
     if (all.every((account) => account.needsReauth)) {
       return 'Every account needs to sign in again.';
+    }
+    // With rotation off the request cannot move to the account that has the
+    // model, and "no quota" would send the user looking at the wrong number.
+    const active = this.accounts.getActive();
+    if (
+      Config.rotationStrategy() === 'manual' &&
+      active &&
+      !active.needsReauth &&
+      !this.modelFor(active, requestedModel)
+    ) {
+      const holders = all
+        .filter((account) => account.id !== active.id && this.modelFor(account, requestedModel))
+        .map((account) => account.email);
+      if (holders.length > 0) {
+        return (
+          `${active.email} does not offer '${requestedModel}'; ${holders.join(', ')} ` +
+          `${holders.length === 1 ? 'does' : 'do'}. Switch to ${holders.length === 1 ? 'that account' : 'one of them'}, ` +
+          'or set antigravityMaestro.rotation.strategy to let requests move there on their own.'
+        );
+      }
     }
     // "Every account" used to hide how many accounts were actually in the
     // running: one whose quota was never fetched has no catalog and is passed
@@ -741,6 +811,9 @@ function describeAccounts(summary: AccountSummary): string {
   }
   if (summary.refused > 0) {
     parts.push(`${summary.refused} refused by Google (verify the account)`);
+  }
+  if (summary.notOffered > 0) {
+    parts.push(`${summary.notOffered} without this model`);
   }
   if (summary.noCatalog > 0) {
     parts.push(`${summary.noCatalog} without quota data`);

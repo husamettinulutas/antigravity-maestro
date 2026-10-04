@@ -24,6 +24,20 @@ export interface CatalogModel {
 }
 
 /**
+ * How a requested id was matched, closest first: the id itself, the successor
+ * the upstream named for a retired one, a documented alias, the best model of
+ * the same family, or the best model of any family.
+ */
+export type MatchKind = 'exact' | 'forwarded' | 'alias' | 'family' | 'any';
+
+export const MATCH_KINDS: readonly MatchKind[] = ['exact', 'forwarded', 'alias', 'family', 'any'];
+
+export interface ModelMatch {
+  model: CatalogModel;
+  kind: MatchKind;
+}
+
+/**
  * Per-model output and thinking limits, mirroring what the Antigravity client
  * sends. The upstream rejects requests whose budget exceeds these.
  *
@@ -129,6 +143,19 @@ export class ModelCatalog {
    * available model of the same family.
    */
   resolve(requestedId: string, accountId?: string): CatalogModel | undefined {
+    return this.resolveMatch(requestedId, accountId)?.model;
+  }
+
+  /**
+   * {@link resolve}, saying how close the answer is to what was asked for.
+   *
+   * The closeness is what lets the rotation tell an account that has the model
+   * from one that only has a stand-in for it: accounts on different plans are
+   * offered different models — one has Opus 5.5 where another still has 4.6 —
+   * and a request for the newer one used to be served by the older one on the
+   * active account without a word.
+   */
+  resolveMatch(requestedId: string, accountId?: string): ModelMatch | undefined {
     let models = this.list(accountId);
     if (models.length === 0) {
       models = this.borrowedModels(accountId);
@@ -140,24 +167,36 @@ export class ModelCatalog {
     const normalized = normalizeId(requestedId);
     const exact = models.find((model) => normalizeId(model.id) === normalized);
     if (exact) {
-      return exact;
+      return { model: exact, kind: 'exact' };
+    }
+
+    // A model the upstream has retired names its own successor, and that is a
+    // better landing than anything guessed from the id.
+    const account = accountId ? this.accounts.get(accountId) : this.accounts.getActive();
+    const successor = account?.quota?.forwardingRules?.[normalized];
+    if (successor) {
+      const target = models.find((model) => normalizeId(model.id) === normalizeId(successor));
+      if (target) {
+        return { model: target, kind: 'forwarded' };
+      }
     }
 
     const aliased = FALLBACK_ALIASES[normalized];
     if (aliased) {
       const target = models.find((model) => model.id === aliased);
       if (target) {
-        return target;
+        return { model: target, kind: 'alias' };
       }
     }
 
     const family = familyOf(normalized);
     const sameFamily = models.filter((model) => model.family === family && model.supportsTools);
     if (sameFamily.length > 0) {
-      return sameFamily.sort(compareModels)[0];
+      return { model: sameFamily.sort(compareModels)[0], kind: 'family' };
     }
 
-    return models.filter((model) => model.supportsTools).sort(compareModels)[0];
+    const any = models.filter((model) => model.supportsTools).sort(compareModels)[0];
+    return any ? { model: any, kind: 'any' } : undefined;
   }
 
   /**

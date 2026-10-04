@@ -119,6 +119,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
     const models = this.catalog.listAll().filter((model) => model.family !== 'image');
     // The largest window on offer, so a model can say it is the smaller one.
     const widest = Math.max(0, ...models.map((model) => model.maxInputTokens));
+    const onActive = new Set(this.catalog.list().map((model) => model.id));
 
     return models.map((model) => ({
       id: model.id,
@@ -131,7 +132,7 @@ export class AntigravityChatProvider implements vscode.LanguageModelChatProvider
       // makes Copilot Chat compact the conversation — an expensive turn the
       // user never asked for, and one they could only discover afterwards.
       detail: `${compactTokens(model.maxInputTokens)} context`,
-      tooltip: tooltipFor(model, widest),
+      tooltip: tooltipFor(model, widest, onActive.has(model.id)),
       capabilities: {
         imageInput: model.supportsImages,
         toolCalling: model.supportsTools,
@@ -908,8 +909,14 @@ export function compactTokens(tokens: number): string {
  * the whole of the defence, and nothing in the picker used to say.
  */
 function tooltipFor(
-  model: { displayName: string; maxInputTokens: number; maxOutputTokens: number },
+  model: {
+    displayName: string;
+    maxInputTokens: number;
+    maxOutputTokens: number;
+    accountEmail?: string;
+  },
   widest: number,
+  onActive: boolean,
 ): string {
   const sizes =
     `${compactTokens(model.maxInputTokens)} context, up to ` +
@@ -919,7 +926,13 @@ function tooltipFor(
       ? ' — switching to it from a larger-context model makes Copilot compact the ' +
         'conversation first, which costs a turn of its own'
       : '';
-  return `${model.displayName} · ${sizes}${warning}`;
+  // The list is every account's models together, so one the active account
+  // does not have says where its requests will go.
+  const elsewhere =
+    !onActive && model.accountEmail
+      ? ` · not on the active account; requests go to ${model.accountEmail}`
+      : '';
+  return `${model.displayName} · ${sizes}${warning}${elsewhere}`;
 }
 
 

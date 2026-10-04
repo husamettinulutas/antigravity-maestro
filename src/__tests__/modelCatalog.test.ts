@@ -76,3 +76,21 @@ test('catalog: nothing is borrowed when no account has a reading', () => {
 
   assert.equal(subject.resolve(OPUS, 'a'), undefined);
 });
+
+test('catalog: a retired model resolves to the successor the upstream named', () => {
+  const subject = catalog([
+    {
+      id: 'a',
+      email: 'a@example.com',
+      quota: {
+        ...quota({ 'claude-opus-5-5-medium': 100, 'claude-sonnet-5-5-medium': 100 }),
+        forwardingRules: { [OPUS]: 'claude-opus-5-5-medium' },
+      },
+    },
+  ]);
+
+  const match = subject.resolveMatch(OPUS, 'a');
+  assert.equal(match?.model.id, 'claude-opus-5-5-medium');
+  assert.equal(match?.kind, 'forwarded');
+  assert.equal(subject.resolveMatch('claude-opus-5-5-medium', 'a')?.kind, 'exact');
+});

@@ -71,6 +71,21 @@ test('headline pools: one reading per vendor family, tightest first', () => {
     (pool) => `${poolLabel(pool.model)} ${pool.model.percentage}%`,
   );
 
-  assert.deepEqual(headline, ['Opus 82%', 'Gemini 97%', 'GPT-OSS 82%']);
-  assert.deepEqual(headline.slice(0, 2), ['Opus 82%', 'Gemini 97%']);
+  assert.deepEqual(headline, ['Opus 4.6 82%', 'Gemini 97%', 'GPT-OSS 82%']);
+  assert.deepEqual(headline.slice(0, 2), ['Opus 4.6 82%', 'Gemini 97%']);
+});
+
+test('pool label: Claude is named with its version, the newest one fronting the pool', () => {
+  const pools = quotaPools([
+    model('claude-opus-4-6-thinking', 100, CLAUDE_RESET),
+    model('claude-opus-5-5-high', 100, CLAUDE_RESET),
+    model('claude-sonnet-5-5-medium', 100, CLAUDE_RESET),
+  ]);
+
+  assert.equal(pools.length, 1);
+  assert.equal(pools[0].model.modelId, 'claude-opus-5-5-high');
+  assert.equal(poolLabel(pools[0].model), 'Opus 5.5');
+  assert.equal(poolLabel(model('claude-opus-4-6-thinking', 1, '')), 'Opus 4.6');
+  // A dated snapshot's date is not a minor version.
+  assert.equal(poolLabel(model('claude-sonnet-4-20250514', 1, '')), 'Sonnet 4');
 });

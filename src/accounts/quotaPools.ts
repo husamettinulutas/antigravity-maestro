@@ -16,13 +16,12 @@ export interface QuotaPool<T extends ModelQuota = ModelQuota> {
 
 /**
  * Preferred faces for a pool, most wanted first. Whichever member matches the
- * earliest pattern represents the bucket; anything unmatched falls back to the
- * largest-context model in the pool.
+ * earliest pattern represents the bucket — the newest Claude version among
+ * them, so a pool holding Opus 4.6 and 5.5 is named after 5.5 — and anything
+ * unmatched falls back to the largest-context model in the pool.
  */
 const REPRESENTATIVE_PRIORITY: RegExp[] = [
-  /^claude-opus-.*thinking$/,
   /^claude-opus/,
-  /^claude-sonnet-.*thinking$/,
   /^claude-sonnet/,
   /^gemini-3-flash-agent$/,
   /^gemini-3(\.\d+)?-pro/,
@@ -93,11 +92,18 @@ export function headlinePools<T extends ModelQuota>(models: T[]): QuotaPool<T>[]
     .map(([, pool]) => pool);
 }
 
-/** Short name for a pool, e.g. "Opus", "Gemini", "GPT-OSS". */
+/**
+ * Short name for a pool, e.g. "Opus 5.5", "Gemini", "GPT-OSS".
+ *
+ * Claude carries its version because accounts on different plans are offered
+ * different ones, and "Opus 100%" said nothing about which Opus was left.
+ */
 export function poolLabel(model: ModelQuota): string {
   const tier = model.modelId.match(/^claude-(opus|sonnet|haiku)/);
   if (tier) {
-    return tier[1].charAt(0).toUpperCase() + tier[1].slice(1);
+    const name = tier[1].charAt(0).toUpperCase() + tier[1].slice(1);
+    const version = claudeVersion(model.modelId);
+    return version ? `${name} ${version.label}` : name;
   }
   if (/^gemini/.test(model.modelId)) {
     return 'Gemini';
@@ -114,12 +120,34 @@ function pickRepresentative<T extends ModelQuota>(members: T[]): T {
     return index === -1 ? REPRESENTATIVE_PRIORITY.length : index;
   };
 
+  const version = (model: T) => claudeVersion(model.modelId)?.order ?? 0;
+  const thinks = (model: T) => (/-thinking$/.test(model.modelId) ? 1 : 0);
+
   return [...members].sort(
     (a, b) =>
       rank(a) - rank(b) ||
+      version(b) - version(a) ||
+      thinks(b) - thinks(a) ||
       (b.maxTokens ?? 0) - (a.maxTokens ?? 0) ||
       (a.displayName ?? a.modelId).localeCompare(b.displayName ?? b.modelId),
   )[0];
+}
+
+/**
+ * `claude-opus-5-5-medium` → 5.5, `claude-sonnet-4-20250514` → 4. A dated
+ * snapshot's date is not a minor version, so the minor is one or two digits.
+ */
+function claudeVersion(modelId: string): { label: string; order: number } | undefined {
+  const match = modelId.match(/^claude-[a-z]+-(\d+)(?:-(\d{1,2})(?!\d))?/);
+  if (!match) {
+    return undefined;
+  }
+  const major = Number(match[1]);
+  const minor = match[2] === undefined ? undefined : Number(match[2]);
+  return {
+    label: minor === undefined ? `${major}` : `${major}.${minor}`,
+    order: major * 100 + (minor ?? 0),
+  };
 }
 
 /** Vendor family of a model id: 'claude', 'gemini', 'gpt', or 'other'. */

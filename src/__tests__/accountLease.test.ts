@@ -19,6 +19,10 @@ const { UpstreamError } = require('../upstream/cloudCodeClient');
 
 const MODEL = { id: 'claude-opus-4-6-thinking' };
 
+function exact(model: unknown) {
+  return { model, kind: 'exact' };
+}
+
 /** Pin how long a run may wait, so a test never sleeps off a real window. */
 function maxWait(seconds: number): void {
   testSettings['rotation.maxWaitSeconds'] = seconds;
@@ -33,7 +37,7 @@ function lease(emails: string[]) {
     getAccessToken: async () => 'token',
     setActive: async () => undefined,
   };
-  const catalog = { resolve: () => MODEL };
+  const catalog = { resolveMatch: () => exact(MODEL) };
   const history = { recordUsage: async () => undefined };
   return new AccountLease(accounts as any, catalog as any, history as any);
 }
@@ -107,7 +111,8 @@ test('lease: an account with no quota left is tried last, not first', async () =
     setActive: async () => undefined,
   };
   const catalog = {
-    resolve: (_model: string, accountId: string) => ({ ...MODEL, quotaPercent: quotas[accountId] }),
+    resolveMatch: (_model: string, accountId: string) =>
+      exact({ ...MODEL, quotaPercent: quotas[accountId] }),
   };
   const subject = new AccountLease(accounts as any, catalog as any, {
     recordUsage: async () => undefined,
@@ -365,7 +370,10 @@ test('lease: the error says how many accounts were actually in the running', asy
     setActive: async () => undefined,
   };
   // Only the first account has a quota reading, so only it has a catalog.
-  const catalog = { resolve: (_model: string, accountId: string) => (accountId === 'a0' ? MODEL : undefined) };
+  const catalog = {
+    resolveMatch: (_model: string, accountId: string) =>
+      accountId === 'a0' ? exact(MODEL) : undefined,
+  };
   const subject = new AccountLease(accounts as any, catalog as any, {
     recordUsage: async () => undefined,
   } as any);
@@ -435,7 +443,7 @@ function conversationLease(emails: string[]) {
       return { dispose: () => undefined };
     },
   };
-  const subject = new AccountLease(accounts as any, { resolve: () => MODEL } as any, {
+  const subject = new AccountLease(accounts as any, { resolveMatch: () => exact(MODEL) } as any, {
     recordUsage: async () => undefined,
   } as any);
 
@@ -497,4 +505,98 @@ test('lease: an account picked by hand releases every conversation', async () =>
   await serve('s1');
 
   assert.equal(tried.at(-1), 's1:a@example.com');
+});
+
+/**
+ * Accounts on different plans, read through the real catalog: the active one
+ * still has Opus 4.6, the other has Opus 5.5 instead.
+ */
+function plansLease() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ModelCatalog } = require('../upstream/modelCatalog');
+  const quota = (...ids: string[]) => ({
+    fetchedAt: Date.now(),
+    models: Object.fromEntries(
+      ids.map((modelId) => [modelId, { modelId, percentage: 100, resetTime: '' }]),
+    ),
+  });
+  const list: any[] = [
+    { id: 'a0', email: 'old@example.com', quota: quota('claude-opus-4-6-thinking', 'gemini-3-flash') },
+    { id: 'a1', email: 'new@example.com', quota: quota('claude-opus-5-5-medium', 'gemini-3-flash') },
+  ];
+  let active = list[0];
+  const accounts = {
+    list: () => list,
+    getActive: () => active,
+    get: (id: string) => list.find((account) => account.id === id),
+    getAccessToken: async () => 'token',
+    setActive: async (id: string) => {
+      active = list.find((account) => account.id === id);
+    },
+  };
+  const subject = new AccountLease(accounts as any, new ModelCatalog(accounts as any), {
+    recordUsage: async () => undefined,
+  } as any);
+  return { subject, list, active: () => active };
+}
+
+test('lease: a model only another account has moves the request there', async () => {
+  maxWait(0);
+  const { subject, active } = plansLease();
+  const served: string[] = [];
+
+  await subject.run('claude-opus-5-5-medium', async (context: any) => {
+    served.push(`${context.email}:${context.model.id}`);
+  });
+
+  // The active account resolves any Claude id to its own Opus 4.6; answering
+  // with that while the picker says 5.5 is what this guards against.
+  assert.deepEqual(served, ['new@example.com:claude-opus-5-5-medium']);
+  assert.equal(active().email, 'new@example.com');
+});
+
+test('lease: a stand-in is still used when no account has the model', async () => {
+  maxWait(0);
+  const { subject } = plansLease();
+  const served: string[] = [];
+
+  await subject.run('claude-sonnet-4-6', async (context: any) => {
+    served.push(`${context.email}:${context.model.family}`);
+  });
+
+  // Retired or unknown ids keep landing on the active account's own Claude.
+  assert.deepEqual(served, ['old@example.com:claude']);
+});
+
+test('lease: the account that has the model is waited for, not swapped out', async () => {
+  maxWait(0);
+  const { subject } = plansLease();
+  const tried: string[] = [];
+
+  await assert.rejects(
+    subject.run('claude-opus-5-5-medium', async (context: any) => {
+      tried.push(`${context.email}:${context.model.id}`);
+      throw new UpstreamError('HTTP 429: quota', 429, '', 60);
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof NoAccountAvailableError);
+      assert.match((error as Error).message, /\[2 accounts: 1 cooling down, 1 without this model\]/);
+      return true;
+    },
+  );
+  assert.deepEqual(tried, ['new@example.com:claude-opus-5-5-medium']);
+});
+
+test('lease: with rotation off the error names the account that has the model', async () => {
+  maxWait(0);
+  testSettings['rotation.strategy'] = 'manual';
+  try {
+    const { subject } = plansLease();
+    await assert.rejects(
+      subject.run('claude-opus-5-5-medium', async () => undefined),
+      /old@example\.com does not offer 'claude-opus-5-5-medium'; new@example\.com does/,
+    );
+  } finally {
+    delete testSettings['rotation.strategy'];
+  }
 });
