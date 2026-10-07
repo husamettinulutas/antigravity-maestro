@@ -1,801 +1,2169 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Antigravity Maestro — cards: integrations, accounts, quotas, usage, trends.
+   Antigravity Maestro — components: hero, gauges, rotation rows, windows,
+   model list, connections, usage.
+   Emphasis budget: only the serving account gets the gradient edge light,
+   ambient glow and glowing ring tips. Everything else is quiet glass.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Pills ───────────────────────────────────────────────────────────────── */
+/* ── Paint: one variable per meaning ─────────────────────────────────────── */
 
-/* One pill component, tinted per meaning. Every status in the panel is one of
-   these, so "what state is this in" always looks the same shape. */
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  max-width: 100%;
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-primary);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.paint-claude, .fam-claude { --c: var(--claude); }
+.paint-gemini, .fam-gemini { --c: var(--gemini); }
+.paint-gpt, .fam-gpt { --c: var(--gpt); }
+.paint-other, .fam-other { --c: var(--other); }
+.paint-warn { --c: var(--warn); }
+.paint-low { --c: var(--low); }
 
-.pill-on {
-  background: rgba(63, 185, 80, 0.12);
-  border-color: rgba(63, 185, 80, 0.3);
-  color: var(--accent-green);
-}
+#g-claude .s0 { stop-color: color-mix(in oklch, var(--claude), var(--canvas) 38%); }
+#g-claude .s1 { stop-color: var(--claude); }
+#g-gemini .s0 { stop-color: color-mix(in oklch, var(--gemini), var(--canvas) 38%); }
+#g-gemini .s1 { stop-color: var(--gemini); }
+#g-gpt .s0 { stop-color: color-mix(in oklch, var(--gpt), var(--canvas) 38%); }
+#g-gpt .s1 { stop-color: var(--gpt); }
+#g-other .s0 { stop-color: color-mix(in oklch, var(--other), var(--canvas) 38%); }
+#g-other .s1 { stop-color: var(--other); }
+#g-warn .s0 { stop-color: color-mix(in oklch, var(--warn), var(--canvas) 30%); }
+#g-warn .s1 { stop-color: var(--warn); }
+#g-low .s0 { stop-color: color-mix(in oklch, var(--low), var(--canvas) 25%); }
+#g-low .s1 { stop-color: var(--low); }
 
-.pill-idle {
-  background: var(--bg-tertiary);
-  border-color: var(--border-primary);
-  color: var(--text-muted);
-}
+.tone-good { color: var(--good); }
+.tone-warn { color: var(--warn); }
+.tone-low { color: var(--low); }
+.tone-muted { color: var(--text-2); }
 
-.pill-off {
-  background: rgba(248, 81, 73, 0.1);
-  border-color: rgba(248, 81, 73, 0.28);
-  color: var(--accent-red);
-}
-
-.pill-live {
-  background: rgba(103, 232, 249, 0.12);
-  border-color: rgba(103, 232, 249, 0.32);
-  color: var(--accent-cyan);
-}
-
-.pill-tier {
-  background: rgba(167, 139, 250, 0.12);
-  border-color: rgba(167, 139, 250, 0.3);
-  color: var(--accent-purple);
-}
-
-.pill-warn {
-  background: rgba(248, 81, 73, 0.12);
-  border-color: rgba(248, 81, 73, 0.32);
-  color: var(--accent-red);
-}
-
-/* Status dots. Flat, and never animated: the panel sits open all day, and a
-   pulsing dot in the corner of the eye is noise, not information. */
-.dot {
+.fam-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex: none;
-}
-
-.dot.on   { background: var(--accent-green); }
-.dot.idle { background: var(--accent-yellow); }
-.dot.off  { background: var(--accent-red); opacity: 0.7; }
-
-/* ── Integration cards ───────────────────────────────────────────────────── */
-
-.agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-/* The coloured left edge is the whole point of this card: it says which agent
-   the row belongs to before a word of it has been read. */
-.agent-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    'dot info status'
-    'actions actions actions';
-  align-items: center;
-  gap: var(--space-2) var(--space-3);
-  padding: var(--space-3);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-left: 3px solid var(--agent-colour, var(--border-primary));
-  border-radius: var(--radius-lg);
-  transition:
-    border-color var(--transition-fast),
-    background var(--transition-fast);
-}
-
-.agent-gateway { --agent-colour: var(--accent-gateway); }
-.agent-copilot { --agent-colour: var(--accent-copilot); }
-.agent-commitMessages { --agent-colour: var(--accent-commit); }
-.agent-claude-code { --agent-colour: var(--accent-claude); }
-.agent-codex { --agent-colour: var(--accent-codex); }
-
-/* An integration that is not installed has no identity to advertise. */
-.agent-card.is-missing {
-  --agent-colour: var(--border-primary);
-  opacity: 0.72;
-}
-
-.agent-card > .dot {
-  grid-area: dot;
-}
-
-.agent-info {
-  grid-area: info;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.agent-name {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The gateway URL, and anything else meant to be copied rather than read. */
-.agent-id {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-status {
-  grid-area: status;
-  justify-self: end;
-}
-
-.agent-actions {
-  grid-area: actions;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: flex-end;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .agent-card:hover {
-    border-color: var(--text-muted);
-    border-left-color: var(--agent-colour, var(--border-primary));
-  }
-}
-
-/* Room for one line again, so put it back on one line. */
-@media (min-width: 560px) {
-  .agent-card {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    grid-template-areas: 'dot info status actions';
-  }
-
-  .agent-actions {
-    flex-wrap: nowrap;
-  }
-}
-
-/* ── Account cards ───────────────────────────────────────────────────────── */
-
-.account-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.account-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  transition:
-    border-color var(--transition-fast),
-    box-shadow var(--transition-fast);
-}
-
-/* The account actually serving requests. One card carries this at a time, so
-   it is worth the brand colour. */
-.account-card.is-active {
-  border-left-color: var(--accent-cyan);
-  background: linear-gradient(135deg, rgba(103, 232, 249, 0.06), transparent 60%),
-    var(--bg-secondary);
-}
-
-.account-card.is-stale {
-  opacity: 0.75;
-}
-
-.account-card.dragging {
-  opacity: 0.45;
-}
-
-/* Narrow: identity on the first line, buttons on the second. Wide: one line,
-   with the buttons on the right of the figure they act on. */
-.account-head {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    'grip chevron avatar info lead'
-    'actions actions actions actions actions';
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--transition-fast);
-}
-
-.account-head > .grip { grid-area: grip; }
-.account-head > .chevron { grid-area: chevron; }
-.account-head > .avatar { grid-area: avatar; }
-.account-head > .account-info { grid-area: info; }
-
-@media (min-width: 560px) {
-  .account-head {
-    grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
-    grid-template-areas: 'grip chevron avatar info lead actions';
-    gap: var(--space-3);
-  }
-}
-
-.grip {
-  cursor: grab;
-  color: var(--text-muted);
-  opacity: 0.55;
-  font-size: var(--font-size-sm);
-  line-height: 1;
-  letter-spacing: -1px;
-  user-select: none;
-}
-
-.account-card.dragging .grip {
-  cursor: grabbing;
-}
-
-.chevron {
-  width: 10px;
-  color: var(--text-muted);
-  font-size: var(--font-size-lg);
-  line-height: 1;
-  text-align: center;
-  transition: transform var(--transition-fast);
-}
-
-.chevron.open {
-  transform: rotate(90deg);
-}
-
-.avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  flex: none;
-}
-
-.account-info {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.account-email {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-sub {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  min-width: 0;
-}
-
-/* The tightest quota on the account, as a figure rather than a chip. It is
-   the number the card exists to report, so it is sized like one. */
-.account-lead {
-  grid-area: lead;
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-  justify-self: end;
-}
-
-.lead-value {
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-  line-height: 1;
-}
-
-.lead-unit {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.lead-label {
-  margin-left: 2px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.account-actions {
-  grid-area: actions;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: flex-end;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .account-card:hover {
-    border-color: var(--text-muted);
-  }
-
-  .account-card.is-active:hover {
-    border-left-color: var(--accent-cyan);
-  }
-
-  .account-head:hover {
-    background: rgba(127, 127, 127, 0.06);
-  }
-
-  .account-head:hover .chevron {
-    color: var(--text-primary);
-  }
-}
-
-.error-note {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: rgba(248, 81, 73, 0.08);
-  border-top: 1px solid rgba(248, 81, 73, 0.2);
-  color: var(--accent-red);
-  font-size: var(--font-size-sm);
-}
-
-.error-note::before {
-  content: '!';
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 12px;
-  text-align: center;
-}
-
-/* ── Quota rows ──────────────────────────────────────────────────────────── */
-
-/* One line per quota pool: family dot, name, bar, figure. This replaces a wrap
-   of long text chips, which cost three lines to say what a bar says in one. */
-.quota-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-.quota-group-name {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-top: var(--space-1);
-}
-
-.quota-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 68px auto;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-}
-
-.quota-dot {
-  display: inline-block;
-  flex: none;
+  flex-shrink: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--family-other);
+  background: var(--c);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--c) 18%, transparent);
 }
 
-.fam-claude { background: var(--family-claude); }
-.fam-gemini { background: var(--family-gemini); }
-.fam-gpt    { background: var(--family-gpt); }
-.fam-other  { background: var(--family-other); }
-
-.quota-name {
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
 
-.quota-bar {
-  height: 4px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  overflow: hidden;
+/* ── Surfaces ─────────────────────────────────────────────────────────── */
+
+.glass,
+.glass-quiet {
+  position: relative;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--glass-hi), var(--glass));
+  box-shadow: inset 0 0 0 1px var(--line), var(--edge), var(--lift);
 }
 
-.quota-bar > span,
-.bar > span {
-  display: block;
-  height: 100%;
-  width: 0%;
-  border-radius: var(--radius-full);
-  transition: width 520ms var(--ease-out);
+.glass {
+  backdrop-filter: blur(12px) saturate(140%);
 }
 
-/* Applied around a silent re-render so the bars do not replay their growth. */
-.instant .quota-bar > span,
-.instant .bar > span {
-  transition: none;
+body.vscode-light .glass,
+body.vscode-light .glass-quiet {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--lift);
 }
 
-.quota-pct {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  text-align: right;
+/* Pointer-follow edge light, masked to the 1px border. */
+.spot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: radial-gradient(160px circle at var(--mx, -400px) var(--my, -400px),
+      color-mix(in oklch, var(--brand-1) 55%, transparent), transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--t-base);
 }
 
-.quota-good { color: var(--quota-good); }
-.quota-warn { color: var(--quota-warn); }
-.quota-low  { color: var(--quota-low); }
+.spot:hover::after {
+  opacity: 1;
+}
 
-.bar-good { background: var(--quota-good); }
-.bar-warn { background: var(--quota-warn); }
-.bar-low  { background: var(--quota-low); }
-
-/* A sidebar this narrow has no room for a bar and a name both. The figure and
-   the name are the two that cannot be dropped. */
-@media (max-width: 319px) {
-  .quota-row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .quota-row .quota-bar {
+@media (prefers-reduced-motion: reduce) {
+  .spot::after {
     display: none;
   }
 }
 
-.quota-reset {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-}
-
-/* ── Model cards (the expanded per-model breakdown) ──────────────────────── */
-
-.model-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: var(--space-2);
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-.model-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-md);
-}
-
-.model-card-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.model-card-name {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-card-pct {
-  font-size: var(--font-size-base);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-
-.bar {
-  height: 4px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  overflow: hidden;
-}
-
-.model-card-sub {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-}
-
-.model-card-id {
-  font-family: var(--font-mono);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-card-sub > span:last-child {
-  flex: none;
-}
-
-.more {
-  padding: 0 var(--space-3) var(--space-3);
-}
-
-/* ── Usage rows ──────────────────────────────────────────────────────────── */
-
-.usage-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.usage-card {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-2);
-  padding: var(--space-3);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--transition-fast);
-}
-
-.usage-head {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
-.usage-model {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.usage-account {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Each count keeps its own colour across the panel, so "which number am I
-   looking at" is answered before the label is read. */
-.metric {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.metric-label {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric-value {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-}
-
-.metric-requests .metric-value { color: var(--text-primary); }
-.metric-input .metric-value    { color: var(--accent-blue); }
-.metric-thinking .metric-value { color: var(--accent-pink); }
-.metric-output .metric-value   { color: var(--accent-green); }
-
-.metric-value.is-zero {
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .usage-card:hover {
-    border-color: var(--text-muted);
-  }
-}
-
-/* A sidebar this narrow fits two counts per line, not four. */
-@media (max-width: 319px) {
-  .usage-card {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Wide enough for one line per record: the head takes the left half and the
-   four counts share the right, aligned into columns down the list. */
-@media (min-width: 560px) {
-  .usage-card {
-    grid-template-columns: minmax(0, 2.2fr) repeat(4, minmax(0, 1fr));
-    align-items: center;
-    gap: var(--space-3);
-  }
-
-  .usage-head {
-    grid-column: auto;
-  }
-
-  .metric {
-    text-align: right;
-  }
-}
-
-/* ── Trend cards ─────────────────────────────────────────────────────────── */
-
-/* auto-fit rather than auto-fill: with two accounts on a wide editor tab,
-   auto-fill still reserved the empty tracks and squeezed both cards down to
-   their minimum, which cut the email short for no reason. The cap keeps a
-   single card from stretching the sparkline across the whole panel. */
-.trends {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 360px));
-  justify-content: start;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-
-.trends:empty {
+body.vscode-high-contrast .spot::after,
+body.vscode-high-contrast-light .spot::after {
   display: none;
 }
 
-.trend {
-  min-width: 0;
-  padding: var(--space-3);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-lg);
+.flash {
+  animation: flash 900ms var(--ease);
 }
 
-.trend-head {
+@keyframes flash {
+  0%, 30% {
+    box-shadow: inset 0 0 0 1px var(--brand-1), 0 0 0 3px var(--brand-soft);
+  }
+}
+
+/* ── Hero: the serving account ────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  padding: 14px 14px 6px;
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(140% 90% at 0% 0%, rgba(103, 232, 249, 0.09), transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, rgba(167, 139, 250, 0.08), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03));
+  backdrop-filter: blur(14px) saturate(150%);
+  box-shadow: var(--edge), var(--lift-hero);
+  scroll-margin-top: 92px;
+}
+
+/* 1px gradient edge light — the only one in the panel. */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.24), rgba(103, 232, 249, 0.5) 28%,
+      rgba(167, 139, 250, 0.38) 62%, rgba(255, 255, 255, 0.04) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+body.vscode-light .hero {
+  background:
+    radial-gradient(140% 90% at 0% 0%, rgba(8, 145, 178, 0.07), transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, rgba(124, 58, 237, 0.06), transparent 60%),
+    #fff;
+}
+
+/* On white the serving card needs more than a hairline: a 1.5px high-chroma
+   cyan-to-violet edge, a cool lift and a faint brand glow. */
+body.vscode-light .hero {
+  box-shadow: 0 1px 2px hsl(222 40% 30% / 0.08), 0 12px 32px -12px hsl(200 80% 40% / 0.30),
+    0 18px 44px -18px hsl(265 80% 55% / 0.30), 0 0 0 4px hsl(195 90% 45% / 0.05);
+}
+
+body.vscode-light .hero::before {
+  padding: 1.5px;
+  background: linear-gradient(150deg, #06b6d4, #0891b2 30%, #7c3aed 70%, rgba(124, 58, 237, 0.35) 100%);
+}
+
+.hero.animate {
+  animation: rise 240ms var(--ease) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.hero-top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-2);
+  gap: 8px;
+  margin: -4px -6px 10px 0;
 }
 
-.trend-name {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.hero-top-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ready-count {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
   white-space: nowrap;
 }
 
-.trend-span {
-  flex: none;
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
+.hero-top .more {
+  color: var(--text-2);
 }
 
-/* The chart needs a frame to read as a chart. Without one, three families all
-   sitting at 100% drew a single line that looked like a horizontal rule. */
-.spark-frame {
-  position: relative;
-  border-top: 1px dashed var(--border-primary);
-  border-bottom: 1px solid var(--border-primary);
-  margin-bottom: var(--space-2);
+.rank {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
 }
 
-.spark-frame::before {
-  content: '100';
-  position: absolute;
-  top: 2px;
-  right: 0;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-  opacity: 0.7;
-}
 
-.spark {
-  display: block;
-  width: 100%;
-  height: 44px;
-}
 
-.spark polyline {
-  fill: none;
-  stroke: var(--family-other);
-  stroke-width: 1.8;
-  vector-effect: non-scaling-stroke;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.spark polyline.spark-claude { stroke: var(--family-claude); }
-.spark polyline.spark-gemini { stroke: var(--family-gemini); }
-.spark polyline.spark-gpt    { stroke: var(--family-gpt); }
-.spark polyline.spark-other  { stroke: var(--family-other); }
-
-.trend-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  font-size: var(--font-size-xs);
-}
-
-.legend {
+.live {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  color: var(--text-secondary);
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-ink);
 }
 
-.legend .quota-dot {
+.live-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-1);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand-1) 20%, transparent), 0 0 10px color-mix(in oklch, var(--brand-1) 70%, transparent);
+}
+
+.gw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  color: var(--text-2);
+  border-radius: var(--r-full);
+  background: var(--surface-0);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: color var(--t-fast), box-shadow var(--t-fast);
+}
+
+body.vscode-light .gw-chip {
+  background: var(--surface-2);
+}
+
+.gw-chip:hover {
+  color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.gw-port {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.sdot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--text-3);
+}
+
+.sdot.on,
+.on > .sdot {
+  background: var(--good);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--good) 18%, transparent);
+}
+
+.sdot.off,
+.off > .sdot {
+  box-shadow: inset 0 0 0 1.5px var(--low);
+}
+
+.hero-id {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.id-email {
+  display: flex;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.id-email .local,
+.acct-email .local {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+}
+
+.id-email .domain,
+.acct-email .domain {
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 450;
+  color: var(--text-3);
+}
+
+.id-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.updated.is-loading {
+  color: var(--brand-ink);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: var(--r-full);
+}
+
+/* Tier: a whisper of the brand pair, not a third accent. */
+.chip-tier {
+  color: color-mix(in oklch, var(--brand-2), var(--text-1) 35%);
+  background: linear-gradient(90deg, color-mix(in oklch, var(--brand-1) 12%, transparent), color-mix(in oklch, var(--brand-2) 16%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-2) 22%, transparent);
+}
+
+body.vscode-light .chip-tier {
+  color: #5b21b6;
+}
+
+.chip-serving {
+  height: 24px;
+  padding: 0 9px 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 28%, transparent);
+}
+
+.chip-serving .live-dot {
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 6px color-mix(in oklch, var(--brand-1) 70%, transparent);
+}
+
+/* ── Avatars ──────────────────────────────────────────────────────────────
+   Without a picture: a gradient disc whose hue is hashed into the cool brand
+   range (190-300), so it never reads as a family colour. */
+
+.avatar {
+  --h: 230;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  font-weight: 600;
+  color: #fff;
+  background: var(--surface-3);
+}
+
+.av-disc {
+  background: linear-gradient(135deg, oklch(0.78 0.12 var(--h)), oklch(0.62 0.15 calc(var(--h) + 40)));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+
+body.vscode-light .av-disc {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 0 1px hsl(222 40% 30% / 0.12);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.avatar-xs { width: 20px; height: 20px; font-size: 10px; }
+.avatar-sm { width: 30px; height: 30px; font-size: 12.5px; }
+.avatar-lg { width: 44px; height: 44px; font-size: 18px; }
+
+.avatar-lg {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 0 3px var(--canvas), 0 0 0 4px color-mix(in oklch, var(--brand-1) 45%, transparent),
+    0 6px 18px -6px color-mix(in oklch, var(--brand-1) 60%, transparent);
+}
+
+body.vscode-light .avatar-lg {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 0 2px #fff, 0 0 0 3.5px color-mix(in oklch, var(--brand-1) 60%, transparent),
+    0 6px 16px -6px color-mix(in oklch, var(--brand-1) 50%, transparent);
+}
+
+.avatar-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--brand-1);
+  box-shadow: 0 0 0 2px var(--canvas), 0 0 8px color-mix(in oklch, var(--brand-1) 80%, transparent);
+}
+
+body.vscode-light .avatar-badge {
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* ── Trouble panel: replaces confidence when the data cannot be trusted ── */
+
+.trouble {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, currentColor 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 26%, transparent);
+}
+
+.trouble.no-action {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.windows.is-dim .win-bar,
+.windows.is-dim .wrow-pct {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.trouble-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.trouble-text b {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.trouble-text span {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+body.vscode-light .trouble.tone-warn {
+  color: oklch(0.48 0.11 65);
+}
+
+/* ── Gauges ───────────────────────────────────────────────────────────────
+   A 270° arc per pool. 9.5-unit stroke with round caps; the track is neutral
+   foreground so an empty pool reads as empty, not as a dim family colour.
+   Size follows the panel: ~92px at 360, 112px from ~440 up. */
+
+.ring {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.ring svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ring-track {
+  fill: none;
+  stroke: color-mix(in oklch, var(--text-1) 11%, transparent);
+  stroke-linecap: round;
+}
+
+body.vscode-light .ring-track {
+  stroke: color-mix(in oklch, var(--text-1) 10%, transparent);
+}
+
+.ring-value {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.ring-md .ring-track,
+.ring-md .ring-value {
+  stroke-width: 9.5;
+}
+
+.gauges {
+  transition: opacity var(--t-base), filter var(--t-base);
+}
+
+.gauges.is-dim {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.gauges.is-loading .ring-value,
+.gauges.is-loading .ring-tip,
+.pills.is-loading .pill-value {
+  animation: breathe 1.1s ease-in-out infinite alternate;
+}
+
+@keyframes breathe {
+  to {
+    opacity: 0.35;
+  }
+}
+
+.animate .ring-value {
+  animation: ring-draw 240ms var(--ease) both;
+}
+
+.animate .ring-tip {
+  animation: fade-in 240ms var(--ease) both;
+}
+
+@keyframes ring-draw {
+  from {
+    stroke-dasharray: 0 100;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.gauges-md {
+  --ring: clamp(64px, calc(28.75vw - 8.5px), 112px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--ring), 1fr));
+  justify-items: center;
+  gap: 6px;
+  max-width: 420px;
+  margin: 18px auto 2px;
+}
+
+.gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.ring-md {
+  width: var(--ring);
+  height: var(--ring);
+}
+
+/* Soft light behind the numeral — the figure the panel exists for. It takes
+   the arc's paint, so it turns amber under 50% and red under 20%. Hero only. */
+.has-glow .ring-md::before {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in oklch, var(--c) 30%, transparent), transparent);
+  filter: blur(5px);
+  pointer-events: none;
+}
+
+body.vscode-light .has-glow .ring-md::before {
+  background: radial-gradient(closest-side, color-mix(in oklch, var(--c) 16%, transparent), transparent);
+}
+
+.has-glow .ring-value {
+  filter: drop-shadow(0 0 3px color-mix(in oklch, var(--c) 55%, transparent));
+}
+
+/* The glowing end-cap: a bright bead where the arc stops. */
+.ring-tip {
+  fill: color-mix(in oklch, var(--c), #fff 72%);
+  filter: drop-shadow(0 0 2.5px var(--c)) drop-shadow(0 0 6px color-mix(in oklch, var(--c) 70%, transparent));
+}
+
+body.vscode-light .has-glow .ring-value {
+  filter: drop-shadow(0 1px 2px color-mix(in oklch, var(--c) 40%, transparent));
+}
+
+body.vscode-light .ring-tip {
+  fill: #fff;
+  filter: drop-shadow(0 0 2px color-mix(in oklch, var(--c) 80%, transparent));
+}
+
+.ring-num {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  top: 49%;
+  transform: translateY(-50%);
+  text-align: center;
+  font-size: min(calc(var(--ring) * 0.356), 38px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.ring-num.is-full {
+  letter-spacing: -0.06em;
+}
+
+.ring-num i {
+  font-style: normal;
+  font-size: 0.34em;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin-left: 0.08em;
+  color: var(--text-3);
+  vertical-align: 0.62em;
+}
+
+.tone-warn .ring-num { color: var(--warn); }
+.tone-low .ring-num { color: var(--low); }
+
+/* Family name in the gap under the arc, held at least 4px below the caps
+   (the caps' lowest point is 84.45% of the ring). */
+.ring-cap {
+  position: absolute;
+  z-index: 2;
+  left: -8px;
+  right: -8px;
+  top: calc(var(--ring) * 0.8445 + 4px);
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 12px;
+  color: var(--c);
+  white-space: nowrap;
+}
+
+.gauge-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: calc(19px - var(--ring) * 0.1555);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gauge-reset svg {
+  color: var(--text-3);
+}
+
+.tone-low .gauge-reset {
+  color: color-mix(in oklch, var(--low), var(--text-2) 30%);
+}
+
+@media (max-width: 320px) {
+  .oss {
+    display: none;
+  }
+}
+
+@media (max-width: 339px) {
+  .id-email .domain {
+    display: none;
+  }
+}
+
+/* ── Insight + suggestion ─────────────────────────────────────────────── */
+
+.insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+.insight-text {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+@media (max-width: 319px) {
+  .insight-text {
+    -webkit-line-clamp: 3;
+  }
+}
+
+.insight-at {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.insight.tone-warn {
+  background: color-mix(in oklch, var(--warn) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warn) 20%, transparent);
+}
+
+.insight.tone-low {
+  background: color-mix(in oklch, var(--low) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--low) 22%, transparent);
+}
+
+body.vscode-light .insight:not(.tone-warn):not(.tone-low) {
+  background: var(--surface-2);
+}
+
+.insight svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.insight.tone-warn,
+.insight.tone-low,
+.insight.tone-good {
+  color: var(--text-2);
+}
+
+.insight.tone-warn svg,
+.insight.tone-warn b { color: var(--warn); }
+.insight.tone-low svg,
+.insight.tone-low b { color: var(--low); }
+.insight.tone-good svg { color: var(--brand-ink); }
+
+.insight b {
+  font-weight: 650;
+}
+
+.suggest {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 6px 6px 6px 9px;
+  font-size: var(--fs-sm);
+  border-radius: var(--r-md);
+  background: linear-gradient(90deg, color-mix(in oklch, var(--brand-1) 9%, transparent), color-mix(in oklch, var(--brand-2) 7%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 22%, transparent);
+}
+
+.suggest .avatar-xs {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+.suggest-text {
+  min-width: 0;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+
+.suggest-text b {
+  color: var(--text-1);
+  font-weight: 650;
+}
+
+.suggest-fam {
+  font-weight: 650;
+  color: var(--c);
+  white-space: nowrap;
+}
+
+.btn-switch {
+  height: 30px;
+  padding: 0 14px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+/* ── Rolling windows (Claude.ai usage grammar) ────────────────────────── */
+
+.windows {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px 16px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.windows-head {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: -2px;
+}
+
+@media (min-width: 470px) {
+  .windows {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.wgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.fam-dot.fam-claude,
+.wgroup .fam-dot {
+  flex-shrink: 0;
+}
+
+.wgroup-head .fam-dot,
+.wfull .fam-dot {
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+
+.wgroup-hint {
+  margin-left: auto;
+  font-weight: 450;
+  color: var(--text-3);
+}
+
+/* Every window full: one transparent hairline line, nothing to read into. */
+.wfull {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.wfull-name {
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.wfull-state {
+  margin-left: auto;
+  color: var(--text-2);
+  text-align: right;
+}
+
+.wfull-state b {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.wrow {
+  display: grid;
+  grid-template-columns: 46px minmax(30px, 1fr) 34px 48px;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  font-size: var(--fs-xs);
+}
+
+.wrow-kind {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.wrow-pct {
+  text-align: right;
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+.wrow-pct.tone-good { color: var(--text-1); }
+.wrow-pct.tone-warn { color: var(--warn); }
+.wrow-pct.tone-low { color: var(--low); }
+
+.wrow-reset {
+  text-align: right;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.win-bar {
+  position: relative;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: color-mix(in oklch, var(--text-1) 10%, transparent);
+}
+
+.win-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in oklch, var(--c), var(--canvas) 35%), var(--c));
+  transition: width var(--t-base);
+}
+
+.win-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-1);
+  opacity: 0.75;
+  box-shadow: 0 0 0 1px var(--canvas);
+}
+
+.animate .win-fill,
+.animate .mrow-bar i {
+  animation: grow 240ms var(--ease) both;
+}
+
+@keyframes grow {
+  from {
+    width: 0;
+  }
+}
+
+/* ── Disclosure + model list ──────────────────────────────────────────── */
+
+.disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: calc(100% + 28px);
+  height: 34px;
+  margin: 12px -14px 0;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  color: var(--text-2);
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.hero .disclosure {
+  margin-bottom: -6px;
+}
+
+.disclosure:hover {
+  color: var(--text-1);
+  background: var(--glass);
+}
+
+.disclosure .chev,
+.conn-toggle .chev {
+  transition: transform var(--t-base);
+}
+
+.disclosure[aria-expanded='true'] .chev,
+.conn-toggle[aria-expanded='true'] .chev {
+  transform: rotate(180deg);
+}
+
+.disclosure.inline {
+  width: auto;
+  height: 24px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.hero .models {
+  margin-bottom: 8px;
+}
+
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0 2px;
+}
+
+.mgroup-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.mgroup-head span {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-3);
+}
+/* Model rows: a name is never cut while a bar is drawn. Narrow panels drop
+   the bar first, then the reset column; names wrap rather than ellipsize. */
+.mrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto clamp(48px, 22%, 140px) 34px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  border-radius: var(--r-sm);
+}
+
+.mrow:hover {
+  background: var(--glass);
+}
+
+.mrow-name {
+  min-width: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.mrow-reset {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.mrow-bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: color-mix(in oklch, var(--text-1) 10%, transparent);
+}
+
+.mrow-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--c);
+}
+
+.mrow-pct {
+  text-align: right;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.mrow-pct.tone-warn { color: var(--warn); }
+.mrow-pct.tone-low { color: var(--low); }
+
+@media (max-width: 419px) {
+  .mrow {
+    grid-template-columns: minmax(0, 1fr) auto 34px;
+  }
+  .mrow-bar {
+    display: none;
+  }
+}
+
+@media (max-width: 329px) {
+  .mrow {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
+  .mrow-reset {
+    display: none;
+  }
+}
+
+/* Two columns only where each column still fits name, reset and number. */
+@media (min-width: 640px) {
+  .models {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 20px;
+    align-items: start;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 799px) {
+  .mrow {
+    grid-template-columns: minmax(0, 1fr) auto 34px;
+  }
+  .mrow-bar {
+    display: none;
+  }
+}
+
+/* ── Rotation ─────────────────────────────────────────────────────────── */
+
+.rotation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.acct {
+  position: relative;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--glass-hi), var(--glass));
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--edge);
+  transition: background var(--t-fast), box-shadow var(--t-fast), opacity var(--t-fast);
+}
+
+body.vscode-light .acct {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--lift);
+}
+
+.acct:hover {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--glass-hi), #fff 3%), var(--glass-hi));
+  box-shadow: inset 0 0 0 1px var(--line), var(--edge);
+}
+
+body.vscode-light .acct:hover {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line), var(--lift);
+}
+
+.acct.is-open {
+  box-shadow: inset 0 0 0 1px var(--line), var(--edge), var(--lift);
+}
+
+/* The serving row stays in the list for order: one slim, marked line. */
+.acct.is-serving {
+  background: linear-gradient(90deg, color-mix(in oklch, var(--brand-1) 8%, transparent), transparent 70%), linear-gradient(180deg, var(--glass-hi), var(--glass));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 22%, transparent), var(--edge);
+}
+
+body.vscode-light .acct.is-serving {
+  background: linear-gradient(90deg, color-mix(in oklch, var(--brand-1) 7%, #fff), #fff 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 30%, transparent), var(--lift);
+}
+
+.acct.dragging {
+  opacity: 0.45;
+}
+
+.rotation.animate .acct {
+  animation: rise 220ms var(--ease) both;
+}
+
+.rotation.animate .acct:nth-child(2) { animation-delay: 30ms; }
+.rotation.animate .acct:nth-child(3) { animation-delay: 60ms; }
+.rotation.animate .acct:nth-child(n + 4) { animation-delay: 90ms; }
+
+/* Narrow (< 600px): name · Use · ⋯ / status / pills. */
+.acct-row {
+  display: grid;
+  grid-template-columns: 14px 30px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'handle avatar email actions'
+    'handle avatar status status'
+    'handle avatar pills pills';
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 3px;
+  padding: 8px 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.acct-row > .avatar {
+  grid-area: avatar;
+  align-self: start;
+  margin-top: 1px;
+}
+
+.acct-main {
+  display: contents;
+}
+
+.acct-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.acct-handle {
+  grid-area: handle;
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  cursor: grab;
+  color: var(--text-3);
+}
+
+.acct-row:not(.acct-slim) .acct-handle {
+  place-items: start center;
+  padding-top: 8px;
+}
+
+.acct-idx {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--t-fast);
+}
+
+.acct-handle .grip {
+  position: absolute;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+
+.acct-row:not(.acct-slim) .acct-handle .grip {
+  top: 9px;
+}
+
+.acct:hover .acct-idx,
+.acct-row:focus-visible .acct-idx {
+  opacity: 0;
+}
+
+.acct:hover .acct-handle .grip,
+.acct-row:focus-visible .acct-handle .grip {
+  opacity: 1;
+}
+
+.acct-email {
+  grid-area: email;
+  display: flex;
+  min-width: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.acct-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acct-actions .more {
+  width: 28px;
+  height: 28px;
+  color: var(--text-3);
+}
+
+.acct-actions .more:hover,
+.acct-actions .more[aria-expanded='true'] {
+  color: var(--text-1);
+}
+
+.btn-row {
+  height: 28px;
+  min-width: 52px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+}
+
+.acct-row:hover .btn-use {
+  color: var(--brand-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 40%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.acct-status {
+  grid-area: status;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-2);
+}
+
+/* Never cut the reset time: wrap instead. */
+.acct-status-text {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.acct-status.tone-warn,
+.acct-status.tone-low {
+  font-weight: 550;
+}
+
+@media (max-width: 329px) {
+  .w-long {
+    display: none;
+  }
+}
+
+.acct.is-trouble .acct-email .local {
+  color: var(--text-2);
+}
+
+/* Ring pills: a 12px family ring and the number, fixed family order. */
+.pills {
+  grid-area: pills;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+  transition: opacity var(--t-base), filter var(--t-base);
+}
+
+.pills.is-dim {
+  opacity: 0.45;
+  filter: saturate(0.4);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 5px;
+  border-radius: var(--r-full);
+  background: color-mix(in oklch, var(--text-1) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+
+body.vscode-light .pill {
+  background: color-mix(in oklch, var(--text-1) 4%, #fff);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.pill svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.pill circle {
+  fill: none;
+  stroke-width: 17;
+  stroke-linecap: round;
+}
+
+.pill-track {
+  stroke: color-mix(in oklch, var(--text-1) 16%, transparent);
+}
+
+body.vscode-light .pill-track {
+  stroke: color-mix(in oklch, var(--text-1) 18%, transparent);
+}
+
+.pill-value {
+  stroke: var(--c);
+}
+
+.pill b {
+  min-width: 2ch;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-1);
+}
+
+.pill.tone-warn b { color: var(--warn); }
+.pill.tone-low b { color: var(--low); }
+
+/* Wide (>= 600px): one line — name and status left, pills, then Use and ⋯.
+   Three pills, Use and ⋯ take about 360px; below 600 the name had no room. */
+@media (min-width: 600px) {
+  .acct-row {
+    grid-template-columns: 14px 30px minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'handle avatar email pills actions'
+      'handle avatar status pills actions';
+    column-gap: 12px;
+    row-gap: 1px;
+    padding: 9px 8px;
+  }
+  .acct-row > .avatar {
+    align-self: center;
+    margin-top: 0;
+  }
+  .acct-row:not(.acct-slim) .acct-handle {
+    place-items: center;
+    padding-top: 0;
+  }
+  .acct-row:not(.acct-slim) .acct-handle .grip {
+    top: auto;
+  }
+  .pills {
+    flex-wrap: nowrap;
+    margin-top: 0;
+  }
+}
+
+/* Serving row: index, avatar with live dot, name, "Serving ↑", ⋯. ~36px. */
+.acct-row.acct-slim {
+  grid-template-columns: 14px 20px minmax(0, 1fr) auto auto;
+  grid-template-areas: 'handle avatar email tag actions';
+  column-gap: 10px;
+  min-height: 36px;
+  padding: 3px 8px;
+}
+
+.acct-slim > .avatar {
+  align-self: center;
+  margin-top: 0;
+}
+
+.acct-slim .acct-email {
+  font-size: var(--fs-sm);
+}
+
+.serving-tag {
+  grid-area: tag;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--brand-ink);
+  border-radius: var(--r-full);
+  background: var(--brand-soft);
+  white-space: nowrap;
+}
+
+.serving-arrow {
+  font-size: 11px;
+  transition: transform var(--t-fast);
+}
+
+.acct-slim:hover .serving-arrow {
+  transform: translateY(-2px);
+}
+
+.acct-slim .avatar-badge {
+  width: 9px;
+  height: 9px;
+}
+
+.acct-body {
+  padding: 0 14px 6px;
+  cursor: auto;
+}
+
+.acct-body .gauges-md {
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.acct-body .trouble + .gauges-md {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+.acct-body .trouble {
+  margin-top: 4px;
+}
+
+.detail-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+@media (max-width: 319px) {
+  .acct-row {
+    grid-template-columns: 12px 26px minmax(0, 1fr) auto;
+    column-gap: 8px;
+  }
+  .acct-row > .avatar-sm {
+    width: 26px;
+    height: 26px;
+    font-size: 11.5px;
+  }
+  .acct-row.acct-slim {
+    grid-template-columns: 12px 20px minmax(0, 1fr) auto auto;
+    column-gap: 8px;
+  }
+}
+
+/* ── Connections ──────────────────────────────────────────────────────── */
+
+.connections {
+  position: relative;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--glass-hi), var(--glass));
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--edge);
+  overflow: hidden;
+}
+
+body.vscode-light .connections {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--lift);
+}
+
+.conn-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 48px;
+  padding: 8px 10px 8px 14px;
+}
+
+.conn-row + .conn-row {
+  border-top: 1px solid var(--line-soft);
+}
+
+.conn-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.conn-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conn-state {
+  margin-left: 4px;
+  font-weight: 500;
+  color: var(--good);
+  font-size: var(--fs-xs);
+}
+
+.sdot.off ~ .conn-text .conn-state {
+  color: var(--low);
+}
+
+.conn-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conn-sub.mono {
+  font-size: 11px;
+}
+
+.conn-sub.is-on {
+  color: var(--text-2);
+}
+
+.conn-row.is-missing .conn-name {
+  color: var(--text-2);
+}
+
+.conn-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.conn-gw .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.conn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px 8px 14px;
+  text-align: left;
+  border-top: 1px solid var(--line-soft);
+  transition: background var(--t-fast);
+}
+
+.conn-toggle:hover {
+  background: var(--glass);
+}
+
+.conn-toggle-label {
+  flex: 1;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.conn-toggle-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.cchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+.cchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.cchip.on {
+  color: var(--text-1);
+}
+
+.cchip .sdot {
   width: 6px;
   height: 6px;
 }
 
-.legend-value {
-  font-weight: 700;
+.cchip.on .sdot {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--good) 18%, transparent);
 }
 
-/* ── Entrance ────────────────────────────────────────────────────────────── */
+.cchip.off .sdot {
+  box-shadow: inset 0 0 0 1px var(--text-3);
+  opacity: 0.6;
+}
 
-/* Only on the session's first paint. The lists are rebuilt on every expand,
-   collapse and drop, and replaying this each time made the whole panel look
-   like it was reloading itself every time a card was touched. */
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
+.conn-list {
+  border-top: 1px solid var(--line-soft);
+}
+
+.conn-list .conn-row .btn-sm {
+  min-width: 0;
+}
+
+/* Narrow: the buttons take their own line instead of squeezing the name. */
+@media (max-width: 359px) {
+  .conn-list .conn-row {
+    grid-template-columns: 7px minmax(0, 1fr);
+  }
+  .conn-list .conn-actions {
+    grid-column: 2;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
   }
 }
 
-.first-paint .account-card,
-.first-paint .agent-card {
-  animation: rise-in 260ms var(--ease-out) both;
+/* ── Usage ────────────────────────────────────────────────────────────── */
+
+/* Headline: one number that matters, the rest beside and under it. */
+.uhead {
+  padding: 16px 16px 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(103, 232, 249, 0.07), transparent 60%),
+    radial-gradient(90% 80% at 100% 0%, rgba(167, 139, 250, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--glass-hi), var(--glass));
 }
 
-.first-paint > :nth-child(2) { animation-delay: 40ms; }
-.first-paint > :nth-child(3) { animation-delay: 80ms; }
-.first-paint > :nth-child(4) { animation-delay: 120ms; }
-.first-paint > :nth-child(n + 5) { animation-delay: 160ms; }
+body.vscode-light .uhead {
+  background:
+    radial-gradient(120% 90% at 0% 0%, rgba(8, 145, 178, 0.06), transparent 60%),
+    radial-gradient(90% 80% at 100% 0%, rgba(124, 58, 237, 0.05), transparent 60%),
+    #fff;
+}
+
+.uhead-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.uhead-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.uhead-big {
+  margin-top: 4px;
+  font-size: 38px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  background: linear-gradient(120deg, var(--text-1) 20%, color-mix(in oklch, var(--brand-1), var(--text-1) 25%) 60%, color-mix(in oklch, var(--brand-2), var(--text-1) 20%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+body.vscode-light .uhead-big {
+  background: linear-gradient(120deg, var(--text-1) 25%, #0e7490 65%, #6d28d9);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.uhead-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-bottom: 2px;
+  text-align: right;
+}
+
+.uhead-stat {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.uhead-stat b {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+/* Token kinds use the brand ramp, never the family colours. */
+.key {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.key-in, .mix-in { background: var(--k-in); }
+.key-think, .mix-think { background: var(--k-think); }
+.key-out, .mix-out { background: var(--k-out); }
+
+:root {
+  --k-in: color-mix(in oklch, var(--brand-1) 85%, var(--canvas));
+  --k-think: var(--brand-2);
+  --k-out: oklch(0.86 0.09 340);
+}
+
+body.vscode-light {
+  --k-in: #0891b2;
+  --k-think: #7c3aed;
+  --k-out: #db2777;
+}
+
+.mix {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin-top: 16px;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
+.mix i,
+.ubar i {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+
+.mix i:first-child,
+.ubar i:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.mix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 9px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.mix-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.mix-key b {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.mix-val {
+  color: var(--text-3);
+}
+
+.fam-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border-radius: var(--r-full);
+  background: color-mix(in oklch, var(--c) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--c) 22%, transparent);
+}
+
+.fchip b {
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+.fchip .fam-dot {
+  width: 6px;
+  height: 6px;
+  box-shadow: none;
+}
+
+.list {
+  padding: 4px 0;
+}
+
+.urow {
+  padding: 10px 14px;
+}
+
+.urow + .urow,
+.arow + .arow,
+.trow + .trow {
+  border-top: 1px solid var(--line-soft);
+}
+
+.urow-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.urow-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.urow-total {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.ubar {
+  display: flex;
+  gap: 1px;
+  height: 6px;
+  margin: 7px 0 6px;
+}
+
+.ubar i:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+.urow-mix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0 0 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.urow-mix .is-zero,
+.urow-mix .is-zero b {
+  color: var(--text-3);
+}
+
+.urow-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.urow-who {
+  min-width: 0;
+}
+
+.urow-who b {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.urow-who .sep {
+  color: var(--text-3);
+}
+
+.urow-req {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.arow {
+  display: grid;
+  grid-template-columns: 20px minmax(60px, 1fr) minmax(40px, 1.2fr) 30px 40px;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: var(--fs-sm);
+}
+
+.arow-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.arow-bar {
+  position: relative;
+  height: 5px;
+  border-radius: var(--r-full);
+  background: var(--surface-0);
+}
+
+body.vscode-light .arow-bar,
+body.vscode-light .mix {
+  background: var(--surface-2);
+}
+
+.arow-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-1), var(--brand-2));
+}
+
+.arow-pct {
+  text-align: right;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.arow-total {
+  text-align: right;
+  font-weight: 600;
+}
+
+/* Quota history: who · strip · now. Full or steady readings are neutral
+   blocks; colour arrives only under 50% (amber) and 20% (red). */
+.text-btn {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  margin: -2px -6px -2px 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  border-radius: var(--r-sm);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.text-btn:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.trow {
+  padding: 9px 14px;
+}
+
+.trow-line {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 108px) minmax(56px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.trow-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.trow-name > :first-child {
+  min-width: 0;
+}
+
+.trow-name .live-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.trow-now {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 40px;
+  line-height: 1.15;
+}
+
+.trow-now b {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.trow-now b.tone-good {
+  color: var(--text-1);
+}
+
+.trow-now small {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.tbars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 20px;
+}
+
+.tb {
+  flex: 1;
+  min-width: 1.5px;
+  border-radius: 1.5px 1.5px 1px 1px;
+  background: color-mix(in oklch, var(--text-1) 47%, var(--surface-1));
+  transition: opacity var(--t-fast);
+}
+
+.tb.tone-warn { background: var(--warn); }
+.tb.tone-low { background: var(--low); }
+
+body.vscode-light .tb {
+  background: color-mix(in oklch, var(--text-1) 46%, #fff);
+}
+
+body.vscode-light .tb.tone-warn { background: var(--warn); }
+body.vscode-light .tb.tone-low { background: var(--low); }
+
+.tbars:hover .tb {
+  opacity: 0.45;
+}
+
+.tbars .tb:hover {
+  opacity: 1;
+}
+
+.trow-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 3px;
+  padding-left: 30px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.trow-sub .tone-muted {
+  color: var(--text-2);
+}
+
+/* Signed out or failed: the strip is history, not news — dim and dashed. */
+.trow.is-stale .trow-name,
+.trow.is-stale .trow-now {
+  opacity: 0.6;
+}
+
+.trow.is-stale .tbars {
+  opacity: 0.4;
+  padding: 2px;
+  margin: -3px;
+  border: 1px dashed var(--text-2);
+  border-radius: 4px;
+}
+
+.trow-flag {
+  font-weight: 550;
+}
+
+@media (max-width: 359px) {
+  .trow-line {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-areas: 'av name now' 'bars bars bars';
+    row-gap: 6px;
+  }
+  .trow-line > .avatar { grid-area: av; }
+  .trow-name { grid-area: name; }
+  .trow-now {
+    grid-area: now;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 5px;
+  }
+  .tbars { grid-area: bars; }
+  .trow-sub { padding-left: 0; }
+}
+
+#usage-body > .section:first-child {
+  margin-top: 0;
+}

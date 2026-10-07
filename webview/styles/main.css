@@ -1,14 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Antigravity Maestro — shell: header, tabs, controls, sections, empty states.
-   Cards live in cards.css, tokens in variables.css.
-
-   Written narrow-first. The sidebar is this view's usual home and it can be
-   dragged down to about 250px, so every layout starts stacked and opens out
-   once there is room:
-
-     base        the sidebar
-     >= 560px    wide sidebar or the editor tab
-     >= 900px    the editor tab at full width
+   Antigravity Maestro — shell: ambient wash, glass top bar, segmented tabs,
+   buttons, sections, menu, empty states. Cards live in cards.css.
+   Narrow-first: the sidebar can be dragged to ~280px.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 *,
@@ -19,455 +12,734 @@
   padding: 0;
 }
 
+html {
+  background: var(--canvas);
+}
+
 body {
+  position: relative;
+  min-height: 100vh;
   font-family: var(--font-sans);
-  font-size: var(--font-size-base);
-  color: var(--text-primary);
-  background: var(--bg-primary);
-  line-height: 1.5;
+  font-size: var(--fs-base);
+  line-height: 1.45;
+  color: var(--text-1);
+  background: var(--canvas);
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
 }
 
 .hidden {
   display: none !important;
 }
 
-/* Every figure in the panel is read by comparing it to the one above it. */
 .num,
-.quota-pct,
-.metric-value,
-.lead-value,
-.legend-value {
+.tnum {
   font-variant-numeric: tabular-nums;
 }
 
-/* One focus ring, declared once, so keyboard users get the same affordance on
-   every control instead of the browser default on some and nothing on others. */
 :focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid color-mix(in oklch, var(--brand-1) 70%, transparent);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
+.svg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
 
-.header {
+/* ── Ambient wash ─────────────────────────────────────────────────────────
+   Real glass needs something behind it. A low cyan light top-left and a
+   violet one top-right, gone by ~260px, so long lists stay calm. */
+.ambient {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 340px;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 70% at 0% 0%, rgba(103, 232, 249, 0.13), transparent 62%),
+    radial-gradient(90% 60% at 100% 4%, rgba(167, 139, 250, 0.12), transparent 64%);
+}
+
+body.vscode-light .ambient {
+  background:
+    radial-gradient(120% 70% at 0% 0%, rgba(8, 145, 178, 0.1), transparent 62%),
+    radial-gradient(90% 60% at 100% 4%, rgba(124, 58, 237, 0.08), transparent 64%);
+}
+
+main,
+.footer {
   position: relative;
+  z-index: 1;
+}
+
+/* ── Top bar: sticky glass, so cards blur beneath it as they scroll ─────── */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 10px var(--gutter) 10px;
+  background: color-mix(in oklch, var(--canvas) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(150%);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.brand-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-secondary);
+  gap: var(--s2);
+  min-height: 34px;
+  margin-bottom: 10px;
 }
 
-/* The brand line under the header. It is the one purely decorative pixel in
-   the panel, and it is what tells you which Maestro you are looking at. */
-.header::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  background: var(--gradient-brand);
-  opacity: 0.6;
-}
-
-.header-left {
+.brand-text {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  flex-direction: column;
   min-width: 0;
 }
 
-.header-logo {
-  display: block;
-  flex-shrink: 0;
-}
-
-.header-title {
-  font-size: var(--font-size-md);
-  font-weight: 700;
-  letter-spacing: 0.01em;
+/* Health line: the state of Connections, one click away. */
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: calc(100vw - 150px);
+  margin-top: 1px;
+  padding: 0 4px;
+  margin-left: -4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-2);
+  border-radius: 4px;
   white-space: nowrap;
-  background: var(--gradient-brand);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  transition: color var(--t-fast), background var(--t-fast);
 }
 
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
+.health:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
 }
 
-/* ── Tab bar ─────────────────────────────────────────────────────────────── */
-
-.tab-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0 var(--space-4);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  position: sticky;
-  top: 0;
-  z-index: 3;
+.health span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.tab-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: var(--font-size-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.tab-btn.active {
-  color: var(--accent-cyan);
-  border-bottom-color: var(--accent-cyan);
-  font-weight: 600;
-}
-
-/* How many accounts, how many models billed. The count is the reason to look
-   at the other tab, so it belongs on the tab rather than inside it. */
-.tab-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  transition:
-    background var(--transition-fast),
-    color var(--transition-fast);
-}
-
-.tab-btn.active .tab-badge {
-  background: var(--accent-cyan);
-  color: var(--text-on-accent);
-}
-
-.tab-badge:empty,
-.tab-badge.zero {
+.hl-short,
+.meta-short {
   display: none;
 }
 
-/* ── Buttons ─────────────────────────────────────────────────────────────── */
+@media (max-width: 339px) {
+  .hl-long,
+  .meta-long {
+    display: none;
+  }
+  .hl-short,
+  .meta-short {
+    display: inline;
+  }
+}
+
+.health-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 0 2.5px color-mix(in oklch, var(--good) 20%, transparent);
+}
+
+.health.is-off,
+.health.is-off:hover {
+  color: var(--warn);
+}
+
+.health.is-off .health-dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 2.5px color-mix(in oklch, var(--warn) 22%, transparent);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand-mark {
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(103, 232, 249, 0.35));
+}
+
+.brand-name {
+  line-height: 18px;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+}
+
+.brand-sub {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* Quiet ghost icons; only "add" carries a tint. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn-primary {
+  margin-left: 4px;
+  color: #071a24;
+  background: linear-gradient(135deg, #67e8f9, #a78bfa);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 3px 10px -3px rgba(124, 140, 250, 0.55);
+}
+
+.icon-btn-primary:hover {
+  color: #071a24;
+  background: linear-gradient(135deg, #8ff0fb, #bba3fc);
+}
+
+body.vscode-light .icon-btn-primary,
+body.vscode-light .icon-btn-primary:hover {
+  color: #fff;
+  background: linear-gradient(135deg, #0891b2, #7c3aed);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 10px -3px rgba(124, 58, 237, 0.45);
+}
+
+body.vscode-light .icon-btn-primary:hover {
+  background: linear-gradient(135deg, #0ea5c6, #8b5cf6);
+}
+
+.icon-btn.is-busy .spin-target {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Segmented tabs ───────────────────────────────────────────────────────
+   A recessed track; the selected pill lifts to the raised surface. */
+
+.segmented {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface-0);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25), inset 0 0 0 1px var(--line-soft);
+}
+
+body.vscode-light .segmented {
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px var(--line-soft);
+}
+
+.seg {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-2);
+  border-radius: 7px;
+}
+
+.seg:hover {
+  color: var(--text-1);
+}
+
+.seg.active {
+  color: var(--text-1);
+  background: var(--surface-3);
+  box-shadow: var(--edge), 0 1px 3px rgba(0, 0, 0, 0.3), inset 0 0 0 1px var(--line);
+}
+
+body.vscode-light .seg.active {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.06), inset 0 0 0 1px var(--line-soft);
+}
+
+.seg-count {
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  border-radius: var(--r-full);
+  color: var(--text-2);
+  background: var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.seg.active .seg-count {
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+
+.seg-count:empty {
+  display: none;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────
+   Machined glass: hairline ring, top highlight, bottom shade. */
 
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  padding: 5px var(--space-3);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  line-height: 1.5;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: var(--fs-sm);
+  font-weight: 550;
   white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    border-color var(--transition-fast),
-    color var(--transition-fast),
-    transform 120ms var(--ease-out);
+  color: var(--text-1);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  transition: background var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast), color var(--t-fast);
 }
 
-/* Press feedback is the one animation every control gets. It is what makes a
-   click feel heard, and it costs nothing on a panel refreshed this often. */
-.btn:active,
-.btn-icon:active,
-.link:active {
-  transform: scale(0.97);
+body.vscode-light .btn {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-.btn-primary {
-  background: var(--gradient-cyan);
-  border-color: transparent;
-  color: var(--text-on-accent);
-  font-weight: 600;
+.btn:hover {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 0 rgba(255, 255, 255, 0.09), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+}
+
+body.vscode-light .btn:hover {
+  background: var(--surface-2);
+}
+
+.btn:active {
+  transform: translateY(0.5px) scale(0.98);
+}
+
+.btn-sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--fs-xs);
 }
 
 .btn-ghost {
   background: transparent;
-  color: var(--text-secondary);
+  box-shadow: none;
+  color: var(--text-2);
 }
 
-.btn-danger {
+body.vscode-light .btn-ghost {
   background: transparent;
-  color: var(--text-secondary);
+  box-shadow: none;
 }
 
-.btn-sm {
-  padding: 3px var(--space-2);
-  font-size: var(--font-size-xs);
+.btn-ghost:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+  box-shadow: none;
 }
 
-/* Square icon buttons for the header, where labels would crowd the wordmark. */
-.btn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: var(--font-size-md);
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    border-color var(--transition-fast),
-    color var(--transition-fast),
-    transform 120ms var(--ease-out);
+/* The one primary action: brand gradient, dark ink in dark themes,
+   white ink in light themes — both above 4.5:1. */
+.btn-primary {
+  color: #062029;
+  background: linear-gradient(180deg, #8ff0fb, #67e8f9 55%, #4fd6ea);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(103, 232, 249, 0.5), 0 4px 14px -4px rgba(103, 232, 249, 0.45);
 }
 
-.btn-icon svg {
-  display: block;
+.btn-primary:hover {
+  background: linear-gradient(180deg, #a5f3fc, #79ecfb 55%, #5edcef);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(103, 232, 249, 0.6), 0 6px 18px -4px rgba(103, 232, 249, 0.55);
 }
 
-.btn-icon.accent {
-  color: var(--accent-cyan);
-  border-color: rgba(103, 232, 249, 0.35);
-  background: rgba(103, 232, 249, 0.1);
+body.vscode-light .btn-primary {
+  color: #fff;
+  background: linear-gradient(180deg, #0ea5c6, #0e7490);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 1px #0e7490, 0 4px 12px -4px rgba(14, 116, 144, 0.5);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .tab-btn:hover {
-    color: var(--text-primary);
-  }
-
-  .btn:hover {
-    background: var(--border-primary);
-    border-color: var(--text-muted);
-  }
-
-  .btn-primary:hover {
-    filter: brightness(1.08);
-  }
-
-  .btn-ghost:hover {
-    color: var(--text-primary);
-  }
-
-  .btn-danger:hover {
-    color: var(--accent-red);
-    border-color: var(--accent-red);
-    background: rgba(248, 81, 73, 0.1);
-  }
-
-  .btn-icon:hover {
-    background: var(--bg-tertiary);
-    border-color: var(--border-primary);
-    color: var(--text-primary);
-  }
-
-  .btn-icon.accent:hover {
-    filter: brightness(1.15);
-  }
+body.vscode-light .btn-primary:hover {
+  background: linear-gradient(180deg, #13b4d6, #0b7c99);
 }
+
+.btn-warn {
+  color: color-mix(in oklch, var(--warn), var(--text-1) 25%);
+  background: color-mix(in oklch, var(--warn) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warn) 38%, transparent);
+}
+
+.btn-warn:hover {
+  background: color-mix(in oklch, var(--warn) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warn) 55%, transparent);
+}
+
+body.vscode-light .btn-warn {
+  color: oklch(0.45 0.11 65);
+  background: color-mix(in oklch, var(--warn) 12%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warn) 45%, transparent);
+}
+
+.link {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-decoration: none;
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.link:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
 
 main {
-  padding: var(--space-4);
+  padding: 14px var(--gutter) 0;
 }
 
-/* ── Section headers ─────────────────────────────────────────────────────── */
+.section {
+  margin-top: 22px;
+}
 
-/* A label on the left, a count on the right. The count is what makes a list
-   feel accounted for rather than merely present. */
+/* Connections leads the Accounts tab: no gap above it, and room below so the
+   serving card's glow does not run into it. */
+#integrations-section {
+  margin-top: 0;
+  margin-bottom: 18px;
+}
+
 .section-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-3);
-  min-height: 24px;
-  margin: 0 2px var(--space-2);
+  gap: var(--s2);
+  padding: 0 4px;
+  margin-bottom: 8px;
 }
 
-.section-title {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+.eyebrow {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.section-meta {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--text-2);
   white-space: nowrap;
 }
 
-.section + .section {
-  margin-top: var(--space-5);
+.section-meta {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-align: right;
 }
 
-/* ── Empty states ────────────────────────────────────────────────────────── */
+/* ── Onboarding (no accounts yet) ─────────────────────────────────────
+   Takes the hero's place, so it may carry the brand edge and glow. */
 
-.empty-state {
+.onboard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  padding: var(--space-5) var(--space-4);
-  border: 1px dashed var(--border-primary);
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
+  gap: 10px;
+  padding: 26px 18px 20px;
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(140% 90% at 0% 0%, rgba(103, 232, 249, 0.10), transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, rgba(167, 139, 250, 0.10), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03));
+  box-shadow: var(--edge), var(--lift-hero);
 }
 
-.empty-state-icon {
-  display: block;
-  width: 44px;
-  height: 44px;
-  margin: 0 auto var(--space-3);
-  opacity: 0.95;
+.onboard::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.24), rgba(103, 232, 249, 0.5) 28%,
+      rgba(167, 139, 250, 0.38) 62%, rgba(255, 255, 255, 0.04) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
 }
 
-.empty-state-title {
-  font-size: var(--font-size-md);
+body.vscode-light .onboard {
+  background:
+    radial-gradient(140% 90% at 0% 0%, rgba(8, 145, 178, 0.07), transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, rgba(124, 58, 237, 0.06), transparent 60%),
+    #fff;
+}
+
+body.vscode-light .onboard::before {
+  padding: 1.5px;
+  background: linear-gradient(150deg, #06b6d4, #0891b2 30%, #7c3aed 70%, rgba(124, 58, 237, 0.35) 100%);
+}
+
+.onboard.animate {
+  animation: rise 240ms var(--ease) both;
+}
+
+.onboard-mark {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 2px;
+  border-radius: 20px;
+  background: radial-gradient(circle at 50% 35%, rgba(103, 232, 249, 0.2), rgba(167, 139, 250, 0.08) 70%);
+  box-shadow: inset 0 0 0 1px var(--line), 0 10px 30px -10px rgba(103, 232, 249, 0.5);
+}
+
+.onboard-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.onboard-desc {
+  max-width: 320px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.onboard-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  margin: 6px 0 4px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line-soft);
+  text-align: left;
+}
+
+.onboard-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.onboard-steps b {
   font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: var(--space-1);
+  color: var(--text-1);
 }
 
-.empty-state-desc {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  line-height: 1.6;
-  max-width: 42ch;
-  margin: 0 auto var(--space-4);
+.step-n {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+  font-size: 11px;
+  font-weight: 650;
+  border-radius: 50%;
+  color: var(--brand-ink);
+  background: linear-gradient(135deg, color-mix(in oklch, var(--brand-1) 18%, transparent), color-mix(in oklch, var(--brand-2) 18%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--brand-1) 32%, transparent);
 }
 
-.empty-state .btn {
-  margin: 0 auto;
+.btn-cta {
+  height: 34px;
+  padding: 0 18px;
+  margin-top: 6px;
+  font-size: var(--fs-base);
 }
 
-.empty-note {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+/* ── Empty states ─────────────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  padding: var(--space-5) var(--space-4);
-  max-width: 46ch;
-  margin: 0 auto;
-  line-height: 1.6;
+  gap: 10px;
+  padding: 28px 20px 24px;
 }
 
-/* ── Footer ──────────────────────────────────────────────────────────────── */
+.empty-mark {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 4px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 50% 35%, rgba(103, 232, 249, 0.18), rgba(167, 139, 250, 0.08) 70%);
+  box-shadow: inset 0 0 0 1px var(--line), 0 10px 30px -10px rgba(103, 232, 249, 0.45);
+}
+
+.empty-title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+.empty-desc {
+  max-width: 300px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.empty .btn-primary {
+  margin-top: 6px;
+  height: 32px;
+  padding: 0 16px;
+}
+
+/* ── Overflow menu (Raycast action panel, Geist menu material) ─────────── */
+
+.menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 188px;
+  padding: 5px;
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--surface-2) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 16px 40px -8px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: menu-in 140ms var(--ease);
+  transform-origin: top right;
+}
+
+body.vscode-light .menu {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1px var(--line), 0 16px 40px -8px hsl(222 40% 30% / 0.25), 0 4px 12px hsl(222 40% 30% / 0.1);
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  font-size: var(--fs-sm);
+  text-align: left;
+  border-radius: 7px;
+  color: var(--text-1);
+}
+
+.menu-item svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  outline: none;
+  background: var(--brand-soft);
+}
+
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}
+
+.menu-item.danger,
+.menu-item.danger svg {
+  color: var(--low);
+}
+
+.menu-item.danger:hover,
+.menu-item.danger:focus-visible {
+  background: color-mix(in oklch, var(--low) 14%, transparent);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
 
 .footer {
   display: flex;
   justify-content: center;
-  padding: var(--space-2) var(--space-4) var(--space-5);
+  padding: 20px 0 18px;
 }
 
-.link {
-  background: none;
-  border: none;
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-md);
-  color: var(--text-link);
-  font-family: inherit;
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition:
-    background var(--transition-fast),
-    transform 120ms var(--ease-out);
-}
 
-@media (hover: hover) and (pointer: fine) {
-  .link:hover {
-    background: var(--bg-tertiary);
-  }
-}
-
-/* ── Wide: 560px and up ──────────────────────────────────────────────────── */
-
-@media (min-width: 560px) {
-  .tab-btn {
-    padding: var(--space-2) var(--space-4);
-  }
-}
-
-/* ── Roomy: the editor tab ───────────────────────────────────────────────── */
-
-@media (min-width: 900px) {
-  main {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: var(--space-5) var(--space-4);
-  }
-}
-
-/* ── Reduced motion ──────────────────────────────────────────────────────── */
-
-/* Fewer and gentler, not none: the bars still fill and the chevron still
-   turns, they just stop travelling across the panel to do it. */
 @media (prefers-reduced-motion: reduce) {
-  .first-paint .account-card,
-  .first-paint .agent-card {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
-
-  .btn:active,
-  .btn-icon:active,
-  .link:active {
-    transform: none;
-  }
-
-  .quota-bar > span,
-  .bar > span {
-    transition-duration: 1ms;
-  }
-}
-
-/* ── Scrollbars ──────────────────────────────────────────────────────────── */
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-primary);
-  border-radius: var(--radius-full);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
-}
-
-::selection {
-  background: rgba(103, 232, 249, 0.25);
 }

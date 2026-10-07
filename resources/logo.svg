@@ -1,29 +1,75 @@
-<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="mark" x1="24" y1="16" x2="76" y2="84" gradientUnits="userSpaceOnUse">
+    <linearGradient id="plate" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#172036" />
+      <stop offset="0.55" stop-color="#0C101C" />
+      <stop offset="1" stop-color="#1B1436" />
+    </linearGradient>
+    <radialGradient id="aura" cx="128" cy="104" r="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9" stop-opacity="0.30" />
+      <stop offset="0.5" stop-color="#8B5CF6" stop-opacity="0.10" />
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="brand" x1="60" y1="40" x2="200" y2="210" gradientUnits="userSpaceOnUse">
       <stop stop-color="#67E8F9" />
       <stop offset="1" stop-color="#A78BFA" />
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop stop-color="#67E8F9" stop-opacity="0.32" />
-      <stop offset="1" stop-color="#67E8F9" stop-opacity="0" />
+    <linearGradient id="field" x1="0" y1="0" x2="256" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9" stop-opacity="0" />
+      <stop offset="0.22" stop-color="#67E8F9" />
+      <stop offset="0.78" stop-color="#A78BFA" />
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0" />
+    </linearGradient>
+    <radialGradient id="orb" cx="114" cy="86" r="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0FDFF" />
+      <stop offset="0.28" stop-color="#8AEAFB" />
+      <stop offset="0.75" stop-color="#7C8CF8" />
+      <stop offset="1" stop-color="#8B5CF6" />
     </radialGradient>
-    <clipPath id="plate"><rect width="96" height="96" rx="22" /></clipPath>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.10" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.30" />
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.06" />
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0.22" />
+    </linearGradient>
+    <filter id="blur-lg" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" />
+    </filter>
+    <filter id="blur-sm" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" />
+    </filter>
+    <clipPath id="clip"><rect width="256" height="256" rx="58" /></clipPath>
   </defs>
 
-  <g clip-path="url(#plate)">
-    <rect width="96" height="96" fill="#0D1117" />
-    <circle cx="48" cy="37.6" r="32" fill="url(#glow)" />
+  <g clip-path="url(#clip)">
+    <!-- Glass plate -->
+    <rect width="256" height="256" fill="url(#plate)" />
+    <rect width="256" height="256" fill="url(#aura)" />
+    <rect width="256" height="140" fill="url(#sheen)" />
+
+    <!-- The field, pressed into a well under the weight. The nearest line
+         bends most and burns brightest; the deeper ones fade out. -->
+    <path d="M-8 214 C70 214 92 226 128 226 C164 226 186 214 264 214" stroke="url(#field)" stroke-width="4" stroke-linecap="round" opacity="0.28" />
+    <path d="M-8 194 C64 194 88 214 128 214 C168 214 192 194 264 194" stroke="url(#field)" stroke-width="6" stroke-linecap="round" opacity="0.5" />
+    <path d="M-8 172 C58 172 84 200 128 200 C172 200 198 172 264 172" stroke="url(#field)" stroke-width="12" stroke-linecap="round" opacity="0.55" filter="url(#blur-sm)" />
+    <path d="M-8 172 C58 172 84 200 128 200 C172 200 198 172 264 172" stroke="url(#field)" stroke-width="8" stroke-linecap="round" />
+
+    <!-- The quota ring, open at the bottom like the panel's gauges -->
+    <path d="M86.6 141.4 A58.5 58.5 0 1 1 169.4 141.4" stroke="#FFFFFF" stroke-opacity="0.17" stroke-width="9" stroke-linecap="round" />
+    <path d="M86.6 141.4 A58.5 58.5 0 1 1 178.7 70.8" stroke="url(#brand)" stroke-width="14" stroke-linecap="round" opacity="0.45" filter="url(#blur-sm)" />
+    <path d="M86.6 141.4 A58.5 58.5 0 1 1 178.7 70.8" stroke="url(#brand)" stroke-width="9" stroke-linecap="round" />
+    <circle cx="178.7" cy="70.8" r="5.5" fill="#FFFFFF" />
+    <circle cx="178.7" cy="70.8" r="11" fill="#C4B5FD" opacity="0.45" filter="url(#blur-sm)" />
 
     <!-- The model, held up by nothing -->
-    <circle cx="48" cy="37.6" r="15.6" fill="url(#mark)" />
-    <!-- The field beneath it, pressed down only where the weight hangs -->
-    <path
-      d="M0 62.4L16 62.4C30 62.4 34 73.6 48 73.6C62 73.6 66 62.4 80 62.4L96 62.4"
-      stroke="url(#mark)"
-      stroke-width="6.8"
-      stroke-linecap="round"
-      opacity="0.75"
-    />
+    <circle cx="128" cy="100" r="40" fill="#67E8F9" opacity="0.55" filter="url(#blur-lg)" />
+    <circle cx="128" cy="100" r="33" fill="url(#orb)" />
+    <ellipse cx="116" cy="86" rx="12" ry="8" fill="#FFFFFF" opacity="0.55" filter="url(#blur-sm)" transform="rotate(-30 116 86)" />
   </g>
+
+  <!-- Rim light -->
+  <rect x="1.5" y="1.5" width="253" height="253" rx="56.5" stroke="url(#rim)" stroke-width="3" />
 </svg>

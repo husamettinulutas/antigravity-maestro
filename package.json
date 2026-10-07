@@ -157,27 +157,8 @@
       "antigravity-maestro": [
         {
           "id": "antigravity-maestro-accounts",
-          "name": "Accounts",
+          "name": "Antigravity Maestro",
           "type": "webview"
-        }
-      ]
-    },
-    "menus": {
-      "view/title": [
-        {
-          "command": "antigravityMaestro.addAccount",
-          "when": "view == antigravity-maestro-accounts",
-          "group": "navigation@1"
-        },
-        {
-          "command": "antigravityMaestro.refreshQuotas",
-          "when": "view == antigravity-maestro-accounts",
-          "group": "navigation@2"
-        },
-        {
-          "command": "antigravityMaestro.openAccounts",
-          "when": "view == antigravity-maestro-accounts",
-          "group": "navigation@3"
         }
       ]
     },

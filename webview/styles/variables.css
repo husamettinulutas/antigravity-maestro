@@ -1,143 +1,141 @@
-/* ===== DESIGN TOKENS =====
-   Shared vocabulary with OpenRouter Maestro so the two extensions read as one
-   family. Same surface ramp, same spacing and radius scale, same agent
-   identity colours. What differs is the brand mark: Antigravity's logo runs
-   cyan into violet, so that pair is the accent here.
+/* ═══════════════════════════════════════════════════════════════════════════
+   Antigravity Maestro — design tokens.
 
-   The palette is owned rather than inherited from the theme, which is what
-   gives the panel its own presence. A light theme still gets a readable
-   surface ramp from the override at the bottom of this file. */
+   Surfaces are generated, not hand-set: every layer is the host theme's own
+   sidebar colour with a measured amount of light (dark themes) or white and
+   shadow (light themes) laid over it, mixed in OKLCH so each step is the same
+   perceptual distance from the last. The panel therefore sits correctly in
+   Dark Modern, Light Modern, Solarized and anything else, while the brand
+   pair (cyan into violet, from the logo) and the family hues stay owned.
+
+   Colour has exactly three jobs here:
+     brand    the serving account, the selected tab, focus
+     family   Claude, Gemini, GPT — matched in lightness so none dominates
+     status   warn and low — only when a number needs attention
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  /* Background Colors */
-  --bg-primary:     #0D1117;
-  --bg-secondary:   #161B22;
-  --bg-tertiary:    #21262D;
-  --bg-elevated:    #1C2128;
+  --host-bg: var(--vscode-sideBar-background, #181818);
+  --host-fg: var(--vscode-foreground, #cccccc);
 
-  /* Border Colors */
-  --border-primary:   #30363D;
-  --border-secondary: #21262D;
+  /* Brand */
+  --brand-1: #67e8f9;
+  --brand-2: #a78bfa;
+  --brand: var(--brand-1);
+  --brand-ink: #67e8f9;
+  --brand-soft: rgba(103, 232, 249, 0.14);
 
-  /* Accent Colors */
-  --accent-blue:    #58A6FF;
-  --accent-green:   #3FB950;
-  --accent-orange:  #D29922;
-  --accent-purple:  #A78BFA;
-  --accent-red:     #F85149;
-  --accent-cyan:    #67E8F9;
-  --accent-pink:    #F778BA;
-  --accent-yellow:  #E3B341;
+  /* Surface ladder (dark). Canvas leans a touch toward blue-black so the
+     brand wash reads as light sitting on it. */
+  --canvas: color-mix(in oklch, var(--host-bg) 84%, #070b18);
+  --surface-0: color-mix(in oklch, var(--canvas), #000 14%);
+  --surface-1: color-mix(in oklch, var(--canvas), #fff 4.5%);
+  --surface-2: color-mix(in oklch, var(--canvas), #fff 7.5%);
+  --surface-3: color-mix(in oklch, var(--canvas), #fff 11%);
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-hi: rgba(255, 255, 255, 0.075);
 
-  /* Text Colors */
-  --text-primary:   #F0F6FC;
-  --text-secondary: #8B949E;
-  --text-muted:     #6E7681;
-  --text-link:      #58A6FF;
-  --text-on-accent: #0D1117;
+  /* Hairlines — texture rather than chrome. */
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
 
-  /* Agent identity. One colour per integration row, carried by its left edge,
-     its dot and its status pill, so the list is scannable before it is read. */
-  --accent-gateway: #67E8F9;
-  --accent-copilot: #58A6FF;
-  --accent-commit:  #E3B341;
-  --accent-claude:  #FF8C42;
-  --accent-codex:   #3FB950;
+  /* Machined edge: a top highlight and a bottom shade on every raised surface. */
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  --lift: 0 1px 1px rgba(0, 0, 0, 0.18), 0 4px 10px -2px rgba(0, 0, 0, 0.28);
+  --lift-hero: 0 18px 44px -18px rgba(103, 232, 249, 0.28), 0 6px 22px -10px rgba(167, 139, 250, 0.22);
 
-  /* Vendor families, used by the quota rows and the trend sparklines. The two
-     places that plot the same families now agree on their colours. */
-  --family-claude: #FF8C42;
-  --family-gemini: #58A6FF;
-  --family-gpt:    #3FB950;
-  --family-other:  #8B949E;
+  /* Text — three steps, every one AA on every surface. */
+  --text-1: color-mix(in oklch, var(--host-fg), #fff 55%);
+  --text-2: color-mix(in oklch, var(--host-fg) 78%, var(--canvas));
+  --text-3: color-mix(in oklch, var(--host-fg) 62%, var(--canvas));
 
-  /* Quota spectrum */
-  --quota-good: #3FB950;
-  --quota-warn: #E3B341;
-  --quota-low:  #F85149;
+  /* Families: saturated and matched in lightness — Claude coral, Gemini
+     blue, GPT-OSS green. */
+  --claude: oklch(0.74 0.16 38);
+  --gemini: oklch(0.72 0.155 256);
+  --gpt: oklch(0.79 0.165 155);
+  --other: oklch(0.75 0.02 260);
 
-  /* Gradients */
-  --gradient-brand: linear-gradient(90deg, #67E8F9 0%, #A78BFA 100%);
-  --gradient-cyan:  linear-gradient(135deg, #67E8F9 0%, #38BDF8 100%);
+  /* Status */
+  --good: oklch(0.8 0.14 158);
+  --warn: oklch(0.83 0.135 82);
+  --low: oklch(0.71 0.18 22);
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  /* Ring tracks are the family at low alpha, so an empty pool still says whose it is. */
+  --track-alpha: 17%;
 
-  /* Typography. The fallback list lives inside var() on purpose: written
-     outside it, a host that does not define the variable invalidates the whole
-     declaration and the panel drops all the way back to the default serif. */
+  /* Type */
   --font-sans: var(--vscode-font-family, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
-  --font-mono: var(--vscode-editor-font-family, 'Cascadia Code', 'Consolas', ui-monospace, monospace);
+  --font-mono: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, ui-monospace, monospace);
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
 
-  --font-size-xs:   11px;
-  --font-size-sm:   12px;
-  --font-size-base: 13px;
-  --font-size-md:   14px;
-  --font-size-lg:   16px;
+  /* 4px grid */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --gutter: 12px;
 
-  /* Spacing */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
+  /* Radius: 6 controls, 10 inner tiles, 14 cards. Nothing above 16. */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
 
-  /* Border Radius */
-  --radius-sm:   4px;
-  --radius-md:   8px;
-  --radius-lg:   12px;
-  --radius-full: 9999px;
-
-  /* Motion. ease-out on anything entering or answering a click; nothing over
-     220ms, because every one of these is seen dozens of times a day. */
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --transition-fast: 150ms var(--ease-out);
-  --transition-base: 220ms var(--ease-out);
+  /* Motion: ease-out, never over 240ms. */
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --t-fast: 140ms var(--ease);
+  --t-base: 220ms var(--ease);
 }
 
-/* A light theme keeps the same structure, hue relationships and identity
-   colours; only the surface ramp and the text ramp invert. Without this the
-   panel would be a black rectangle in the middle of a white editor. */
 body.vscode-light {
-  --bg-primary:     #FFFFFF;
-  --bg-secondary:   #F6F8FA;
-  --bg-tertiary:    #EAEEF2;
-  --bg-elevated:    #FFFFFF;
+  --brand-1: #0891b2;
+  --brand-2: #7c3aed;
+  --brand-ink: #0e7490;
+  --brand-soft: rgba(8, 145, 178, 0.1);
 
-  --border-primary:   #D0D7DE;
-  --border-secondary: #E4E8EC;
+  --canvas: color-mix(in oklch, var(--host-bg) 80%, #e9eef7);
+  --surface-0: color-mix(in oklch, var(--canvas), #1e293b 6%);
+  --surface-1: #ffffff;
+  --surface-2: color-mix(in oklch, #ffffff, #1e3a8a 3%);
+  --surface-3: color-mix(in oklch, #ffffff, #1e3a8a 6%);
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-hi: rgba(255, 255, 255, 0.9);
 
-  --text-primary:   #1F2328;
-  --text-secondary: #59636E;
-  --text-muted:     #818B98;
-  --text-on-accent: #FFFFFF;
+  --line-soft: rgba(15, 23, 42, 0.06);
+  --line: rgba(15, 23, 42, 0.09);
+  --line-strong: rgba(15, 23, 42, 0.16);
 
-  --accent-blue:    #0969DA;
-  --accent-green:   #1A7F37;
-  --accent-orange:  #9A6700;
-  --accent-purple:  #8250DF;
-  --accent-red:     #CF222E;
-  --accent-cyan:    #0E7490;
-  --accent-pink:    #BF3989;
-  --accent-yellow:  #9A6700;
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --lift: 0 1px 1px hsl(222 40% 30% / 0.06), 0 3px 8px hsl(222 40% 30% / 0.06), 0 10px 22px -6px hsl(222 40% 30% / 0.08);
+  --lift-hero: 0 1px 1px hsl(222 40% 30% / 0.05), 0 14px 34px -14px rgba(8, 145, 178, 0.32), 0 8px 26px -14px rgba(124, 58, 237, 0.26);
 
-  --accent-gateway: #0E7490;
-  --accent-copilot: #0969DA;
-  --accent-commit:  #9A6700;
-  --accent-claude:  #BC4C00;
-  --accent-codex:   #1A7F37;
+  --text-1: color-mix(in oklch, var(--host-fg), #000 45%);
+  --text-2: color-mix(in oklch, var(--host-fg) 86%, #64748b);
+  --text-3: color-mix(in oklch, var(--host-fg) 62%, #64748b);
 
-  --family-claude: #BC4C00;
-  --family-gemini: #0969DA;
-  --family-gpt:    #1A7F37;
-  --family-other:  #59636E;
+  --claude: oklch(0.63 0.18 36);
+  --gemini: oklch(0.55 0.2 260);
+  --gpt: oklch(0.6 0.16 155);
+  --other: oklch(0.55 0.02 260);
 
-  --quota-good: #1A7F37;
-  --quota-warn: #9A6700;
-  --quota-low:  #CF222E;
+  --good: oklch(0.55 0.13 155);
+  /* Dark enough for 4.5:1 as text on white. */
+  --warn: oklch(0.56 0.125 66);
+  --low: oklch(0.53 0.2 25);
 
-  --gradient-brand: linear-gradient(90deg, #0E7490 0%, #8250DF 100%);
+  --track-alpha: 14%;
+}
 
-  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.08);
-  --shadow-md: 0 4px 12px rgba(31, 35, 40, 0.12);
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --line: var(--vscode-contrastBorder, #6fc3df);
+  --line-strong: var(--vscode-contrastBorder, #6fc3df);
+  --lift: none;
+  --lift-hero: none;
 }

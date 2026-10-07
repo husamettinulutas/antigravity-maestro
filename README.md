@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/accounts.png" width="820" alt="The Accounts panel: gateway and agent integrations on top, then one card per Google account with its tightest quota and a bar per model family" />
+  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/accounts.png" width="440" alt="The Accounts tab: Connections on top, then the serving account with ring gauges for Claude, Gemini and GPT-OSS, a warning that Claude will run out before it resets, a one-click switch to an account with Claude at 100%, the rolling 5-hour and weekly windows, and the rest of the pool in rotation order" />
 </p>
 
 ---
@@ -83,16 +83,22 @@ Or search for **Antigravity Maestro** in the Extensions view. Requires VS Code 1
 
 ### What the panel shows
 
-The **Accounts** tab stacks the integrations on top, each on its own colour, then one card per
-account. A collapsed card still carries the whole story: the tightest quota as a figure, and one
-bar per model family. Expand it for the per-model breakdown and the rolling 5-hour and weekly
-windows. Drag the cards to set the order rotation falls back down.
+The **Accounts** tab opens on **Connections**: whether the gateway is running, with its URL a click
+away, and which agents are wired to the pool. Below it, the account serving right now gets the
+whole stage, with a ring gauge per model family (Claude, Gemini, GPT-OSS) and when each one resets.
+If it is spending fast, the card says when it will run dry. If another account has more of that
+family left, the card offers to switch to it in one click. Under that, the 5-hour and weekly rolling
+windows. The rest of the pool is listed in rotation order, each account with its status in words, a
+pill per family, and **Use** to serve from it. Drag the list to set the order rotation falls back
+down. Refreshing, reordering and removing an account are in its ⋯ menu.
 
-The **Usage** tab tracks what the pool actually spent: a quota trend per account, then requests and
-input / thinking / output tokens for every model that answered.
+The **Usage** tab tracks what the pool actually spent. It starts with the total tokens served and
+the input / thinking / output mix. Then it breaks the spend down per model, each with its own
+input, thinking and output figures and the accounts that served it, and per account. Last, a quota
+history per account shows how fast each family is draining.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/usage.png" width="820" alt="The Usage tab: a quota trend sparkline per account, then one card per model with its request count and token totals" />
+  <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/usage.png" width="440" alt="The Usage tab: total tokens served with the input, thinking and output mix, then each model's tokens split into input, thinking and output with the accounts that served it, the share per account, and a quota history per account with its drain rate" />
 </p>
 
 ## Models
