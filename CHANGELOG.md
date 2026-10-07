@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.2.0
+
+- **A redesigned accounts panel.** The account serving right now leads the
+  Accounts tab on its own card. Each model family (Claude, Gemini, GPT-OSS)
+  has a ring gauge with its reset countdown, followed by the rolling 5-hour
+  and weekly windows. A window group that is entirely full folds to one line.
+- **The panel tells you when to switch.** When the serving account is
+  draining fast, its card says when the family will run dry and how long
+  before it resets. When another account has more of that family left, the
+  card names it and switches to it in one click.
+- **The rest of the pool is listed in rotation order.** Each account shows
+  its position, its status in words ("Claude empty · back in 1h 20m"), a
+  pill per family, and one **Use** or **Sign in** button. Refreshing,
+  moving and removing an account are in its ⋯ menu, so Remove no longer
+  sits next to Use. Dragging still sets the order.
+- **Connections sit at the top, folded.** One card shows whether the
+  gateway is running, with copy and restart a click away, and which agents
+  are wired. The five integration cards that used to push the accounts
+  below the fold are gone. A line under the title ("Gateway on · 2 of 4
+  tools") carries the same health on both tabs.
+- **Usage tells you where the tokens went.** It shows the total served
+  with its input / thinking / output mix, then each model's tokens. Every
+  model has its own input, thinking and output figures and the accounts
+  that served it. A share per account and a quota history per account
+  follow, the history with how fast each family drains. Model ids are
+  shown by their display names.
+- **A new icon.** The model now sits inside a quota ring over the field it
+  bends, in the marketplace icon, the activity bar and the panel.
+- **The view's title bar no longer repeats the panel.** Its add, refresh
+  and open-in-editor buttons are gone, since the panel has its own, and
+  the title reads "Antigravity Maestro" instead of "Antigravity Maestro:
+  Accounts". The editor-tab version is still in the Command Palette.
+- Only the serving account starts expanded. Accounts you expanded before
+  this update start folded again.
+
 ## 1.1.0
 
 - **Copilot Chat offers a Thinking Effort choice for the tiered Gemini Flash
