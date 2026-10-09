@@ -9,9 +9,11 @@ import { GeminiRequest } from '../protocol/gemini';
  * Claude Code's ultracode mode, for the models served here.
  *
  * Ultracode asks the model to orchestrate every substantive task with the
- * Workflow tool. Claude Code says so only as text in meta user messages — a
- * full reminder when it turns on, a sparse one now and then after that, one
- * when it turns off, and a one-turn note when the user typed the keyword.
+ * Workflow tool. Claude Code says so only as text in meta messages — a full
+ * reminder when it turns on, a sparse one now and then after that, one when
+ * it turns off, and a one-turn note when the user typed the keyword. Older
+ * versions wrap each in a `<system-reminder>` inside a user message; 2.1.295
+ * sends them as bare text in `system` messages among the conversation.
  * Claude reads those and acts on them. Gemini and GPT-OSS weigh text buried in
  * user turns far below the system instruction, the sparse reminder is easy to
  * miss, and the Workflow tool's own description says to run only on an
@@ -29,8 +31,9 @@ type MarkerKind = 'on' | 'off' | 'keyword';
 /**
  * The reminders' opening sentences, as Claude Code 2.1.295 writes them. The
  * dash may be an em dash or a plain hyphen, and spacing may vary. Each has to
- * start a line inside a `<system-reminder>`, so a user who quotes one in a
- * sentence — or a file that contains one — does not switch anything.
+ * start a line of a `system` message or of a `<system-reminder>` in a user
+ * message, so a user who quotes one in a sentence — or a file that contains
+ * one — does not switch anything.
  */
 const MARKERS: { kind: MarkerKind; pattern: RegExp }[] = [
   { kind: 'on', pattern: /^Ultracode\s+is\s+on\s*[:—–-]/i },
@@ -58,7 +61,7 @@ const NO_TOOLS = /\bRespond with TEXT ONLY\b|\bDo NOT call any tools\b/i;
  * adds among them does not end it, and the next prompt the user types does.
  */
 export function ultracodeState(messages: AnthropicMessage[]): UltracodeState | undefined {
-  const found = messages.map((message) => (message.role === 'user' ? markersIn(message) : []));
+  const found = messages.map(markersIn);
 
   let session = false;
   for (const kinds of found) {
@@ -156,8 +159,18 @@ function ultracodeDirective(state: UltracodeState, canLoadReference: boolean): s
 
 // ── Reading the conversation ──────────────────────────────────────────────────
 
-/** The ultracode reminders in one user message, in order. */
+/**
+ * The ultracode reminders in one message, in order: anywhere in a `system`
+ * message, which only Claude Code writes, and inside the `<system-reminder>`s
+ * of a user message. What the assistant wrote never counts.
+ */
 function markersIn(message: AnthropicMessage): MarkerKind[] {
+  if (message.role === 'system') {
+    return textsOf(message.content).flatMap(markersInReminder);
+  }
+  if (message.role !== 'user') {
+    return [];
+  }
   const kinds: MarkerKind[] = [];
   for (const text of textsOf(message.content)) {
     if (!text.includes('<system-reminder>')) {
@@ -215,9 +228,9 @@ function textsOf(content: string | AnthropicContentBlock[] | undefined): string[
 
 /**
  * Where the current human turn starts: the last user message that opens one.
- * A meta-only user message right before it (one Claude Code did not merge
- * into the prompt) belongs to the same turn. With no human turn found, the
- * whole conversation is one turn.
+ * A meta-only user or system message right before it (one Claude Code did
+ * not merge into the prompt) belongs to the same turn. With no human turn
+ * found, the whole conversation is one turn.
  */
 function currentTurnStart(messages: AnthropicMessage[]): number {
   let start = -1;
@@ -230,7 +243,7 @@ function currentTurnStart(messages: AnthropicMessage[]): number {
   if (start < 0) {
     return 0;
   }
-  while (start > 0 && messages[start - 1].role === 'user' && !hasToolResult(messages[start - 1])) {
+  while (start > 0 && messages[start - 1].role !== 'assistant' && !hasToolResult(messages[start - 1])) {
     start--;
   }
   return start;
@@ -301,13 +314,20 @@ function wasInterrupted(message: AnthropicMessage): boolean {
 }
 
 /**
- * True when the request's last message says not to call tools — Claude Code's
- * compaction prompt does ("Respond with TEXT ONLY. Do NOT call any tools."),
- * and so may a user who wants a plain answer.
+ * True when the request's latest user message says not to call tools — Claude
+ * Code's compaction prompt does ("Respond with TEXT ONLY. Do NOT call any
+ * tools."), and so may a user who wants a plain answer. Claude Code may put
+ * `system` messages after it, so the user messages since the assistant last
+ * spoke are the ones read.
  */
 function forbidsTools(messages: AnthropicMessage[]): boolean {
-  const last = messages[messages.length - 1];
-  return last?.role === 'user' && userTexts(last).some((text) => NO_TOOLS.test(text));
+  for (let i = messages.length - 1; i >= 0 && messages[i].role !== 'assistant'; i--) {
+    const message = messages[i];
+    if (message.role === 'user' && userTexts(message).some((text) => NO_TOOLS.test(text))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The text of a user message's own blocks, reminders taken out. */

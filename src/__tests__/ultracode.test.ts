@@ -271,3 +271,64 @@ test('ultracode: the log line names the state', () => {
   assert.equal(describeUltracode('turn'), 'ultracode=turn');
   assert.equal(describeUltracode(undefined), 'ultracode=-');
 });
+
+// ── Claude Code 2.1.295: meta text in `system` messages ───────────────────────
+
+/** A meta message as 2.1.295 sends it: bare text, no `<system-reminder>`, after the prompt. */
+const meta = (...lines: string[]): AnthropicMessage => ({ role: 'system', content: lines.join('\n\n') });
+
+const ENVIRONMENT = '# Environment\nYou have been invoked in the following environment:\n - Platform: win32';
+const TOTAL = '<total_tokens>15000000 tokens left</total_tokens>';
+
+test('ultracode: a system message turns it on for the session, as 2.1.295 sends it', () => {
+  // The first request of a session with ultracode on: the prompt, then one
+  // system message carrying the environment and the reminder.
+  const first: AnthropicMessage[] = [prompt('projeyi inceler misin?'), meta(ENVIRONMENT, TOTAL, ON, "Today's date is 2026-10-09.")];
+  assert.equal(ultracodeFor(body(first)), 'session');
+  assert.match(noted(body(first))[1], /Ultracode is on for this session/);
+
+  // Later turns carry it in the history, behind newer system messages.
+  const later = [...first, answer('ok'), prompt('ikinci tur'), meta(TOTAL)];
+  assert.equal(ultracodeFor(body(later)), 'session');
+  assert.equal(ultracodeFor(body([...later, answer('ok'), prompt('next'), meta(OFF)])), undefined);
+});
+
+test('ultracode: a keyword note in a system message holds for its turn', () => {
+  const turn: AnthropicMessage[] = [prompt('ultracode analiz et'), meta(ENVIRONMENT, KEYWORD)];
+  assert.equal(ultracodeState(turn), 'turn');
+  const looped = [...turn, toolCall('t1'), toolResult('t1'), meta(TOTAL)];
+  assert.equal(ultracodeState(looped), 'turn');
+  assert.equal(ultracodeState([...looped, answer('done'), prompt('thanks'), meta(TOTAL)]), undefined);
+});
+
+test('ultracode: a system message before the prompt belongs to its turn', () => {
+  assert.equal(ultracodeState([answer('hi'), meta(KEYWORD), prompt('ultracode go')]), 'turn');
+});
+
+test('ultracode: a quoted or fenced reminder in a system message does not count', () => {
+  assert.equal(ultracodeState([prompt('hi'), meta(`Notes: ${ON}`)]), undefined);
+  assert.equal(ultracodeState([prompt('hi'), meta('```', ON, '```')]), undefined);
+});
+
+test('ultracode: a compaction prompt followed by a system message is still not told to orchestrate', () => {
+  const compaction: AnthropicMessage[] = [
+    prompt('build the thing'),
+    meta(ON),
+    answer('done'),
+    { role: 'user', content: 'CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nSummarize.' },
+    meta(TOTAL),
+  ];
+  assert.equal(ultracodeState(compaction), 'session');
+  assert.equal(ultracodeFor(body(compaction)), undefined);
+});
+
+test('ultracode: an earlier turn that forbade tools does not silence a later one', () => {
+  const messages: AnthropicMessage[] = [
+    { role: 'user', content: 'Do NOT call any tools, just answer.' },
+    meta(ON),
+    answer('ok'),
+    prompt('now build it'),
+    meta(TOTAL),
+  ];
+  assert.equal(ultracodeFor(body(messages)), 'session');
+});

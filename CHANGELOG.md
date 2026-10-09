@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+- **Ultracode reaches the model again with Claude Code 2.1.295.** That
+  version no longer wraps its ultracode reminders in `<system-reminder>`
+  text inside user messages; it sends them as `system` messages among the
+  conversation. The gateway only looked for the old form, so it never saw
+  ultracode was on, and Gemini and GPT-OSS answered without starting a
+  workflow. Both forms are read now, and the request log shows
+  `ultracode=session` again.
+- **Compaction stays tool-free under ultracode.** Claude Code now often ends
+  a request with a `system` message, which hid its "do not call tools"
+  prompt from the gateway. The prompt is found wherever it sits after the
+  last answer, so a summary request is not told to orchestrate.
+
 ## 1.3.0
 
 - **Each window keeps its own account.** Picking an account in one VS Code

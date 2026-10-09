@@ -45,7 +45,12 @@ export type AnthropicContentBlock =
   | { type: string; [key: string]: unknown };
 
 export interface AnthropicMessage {
-  role: 'user' | 'assistant';
+  /**
+   * `system`: a meta message Claude Code 2.1.295+ places inside the
+   * conversation (environment, reminders) instead of a `<system-reminder>`
+   * in a user turn. It is sent upstream as user text.
+   */
+  role: 'user' | 'assistant' | 'system';
   content: string | AnthropicContentBlock[];
 }
 
