@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 - **Each window keeps its own account.** Picking an account in one VS Code
   window used to move every other open window to it, because the choice was
