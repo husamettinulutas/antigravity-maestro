@@ -154,11 +154,27 @@ server after a port change, or if requests stop going through.
 
 Copilot Chat does not use the gateway; those requests never leave the extension host.
 
+### Several windows, several accounts
+
+Each VS Code window keeps its own serving account, and each project folder remembers the one it was
+on. Open two projects side by side, pick a different account in each, and neither moves the other.
+A window you have never picked in starts on the account you picked last.
+
+Every window runs a gateway, and only one of them can hold the preferred port. The others start on
+the next free port but give agents the preferred address, so Claude Code and Codex configs always
+name `127.0.0.1:8765`. When the window that holds the port closes, another window takes it over
+within seconds. Agents send their window's name with each request, so whichever window's gateway
+answers, the request runs on that window's account.
+
+With the default `highest-quota-first` rotation, a window whose account runs out falls back to the
+next account in the list, which may be the one another window is using. Set
+`antigravityMaestro.rotation.strategy` to `manual` to keep every window on its own account.
+
 ## Configuration
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `antigravityMaestro.gateway.port` | `8765` | Preferred gateway port; the next free port is used if it is taken. |
+| `antigravityMaestro.gateway.port` | `8765` | Preferred gateway port, shared by every window; a window that cannot bind it uses the next free port. |
 | `antigravityMaestro.gateway.autoStart` | `true` | Start the gateway with VS Code. |
 | `antigravityMaestro.rotation.strategy` | `highest-quota-first` | `manual`, `round-robin`, or `highest-quota-first`. |
 | `antigravityMaestro.rotation.cooldownMinutes` | `15` | Fallback cooldown after a rate limit. |

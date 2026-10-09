@@ -600,3 +600,82 @@ test('lease: with rotation off the error names the account that has the model', 
     delete testSettings['rotation.strategy'];
   }
 });
+
+// ── Requests from other windows ───────────────────────────────────────────────
+
+/** A lease in one window, with each window's account as published. */
+function windowsLease(emails: string[], chosen: Record<string, string>) {
+  const list = emails.map((email, index) => ({ id: `a${index}`, email }));
+  const routes = new Map(Object.entries(chosen).map(([window, id]) => [window, { id, at: 0 }]));
+  const moved: string[] = [];
+  const accounts = {
+    list: () => list,
+    getActive: (window = 'own') => list.find((account) => account.id === routes.get(window)?.id) ?? list[0],
+    get: (id: string) => list.find((account) => account.id === id),
+    getAccessToken: async () => 'token',
+    setActive: async (id: string, byUser = true, window = 'own') => {
+      routes.set(window, { id, at: byUser ? Date.now() : (routes.get(window)?.at ?? 0) });
+      moved.push(`${window}:${id}`);
+    },
+    chosenAt: (window = 'own') => routes.get(window)?.at,
+  };
+  const subject = new AccountLease(accounts as any, { resolveMatch: () => exact(MODEL) } as any, {
+    recordUsage: async () => undefined,
+  } as any);
+
+  const tried: string[] = [];
+  const serve = (window: string | undefined, session?: string, refusing?: string) =>
+    subject.run(
+      'claude-opus-4-6-thinking',
+      async (context: { email: string }) => {
+        tried.push(`${window ?? 'own'}:${context.email}`);
+        if (context.email === refusing) {
+          throw rateLimited();
+        }
+        return 'ok';
+      },
+      undefined,
+      session,
+      window,
+    );
+  return { subject, accounts, moved, tried, serve };
+}
+
+test('lease: a request from another window runs on the account that window chose', async () => {
+  maxWait(0);
+  const { tried, serve } = windowsLease(['a@example.com', 'b@example.com'], { own: 'a0', w2: 'a1' });
+
+  await serve(undefined);
+  await serve('w2');
+
+  assert.deepEqual(tried, ['own:a@example.com', 'w2:b@example.com']);
+});
+
+test("lease: rotation for another window's request moves that window, not this one", async () => {
+  maxWait(0);
+  const { moved, tried, serve } = windowsLease(['a@example.com', 'b@example.com'], {
+    own: 'a0',
+    w2: 'a1',
+  });
+
+  await serve('w2', undefined, 'b@example.com');
+
+  assert.deepEqual(tried, ['w2:b@example.com', 'w2:a@example.com']);
+  assert.deepEqual(moved, ['w2:a0']);
+});
+
+test('lease: a pick by hand in another window releases its conversations', async () => {
+  maxWait(0);
+  const { subject, accounts, tried, serve } = windowsLease(['a@example.com', 'b@example.com'], {
+    w2: 'a0',
+  });
+
+  await serve('w2', 's1', 'a@example.com');
+  expireCooldown(subject, 'a0', MODEL.id);
+  // Rotation moved w2 to b; then its user picks a again.
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await accounts.setActive('a0', true, 'w2');
+  await serve('w2', 's1');
+
+  assert.equal(tried.at(-1), 'w2:a@example.com');
+});

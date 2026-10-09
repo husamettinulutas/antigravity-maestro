@@ -9,9 +9,9 @@ import { AgentIntegration } from './integrations/agentIntegration';
 import { ClaudeCodeIntegration } from './integrations/claudeCode';
 import { CodexIntegration } from './integrations/codex';
 import { AgentTarget } from './integrations/shared';
+import { CLAUDE_HEADERS_ENV, WINDOW_ENV, withWindowHeader } from './integrations/window';
 import { AntigravityChatProvider } from './provider/copilotProvider';
 import { AccountsViewProvider } from './ui/accountsView';
-import { AccountStatusBar } from './ui/statusBar';
 import { CloudCodeClient } from './upstream/cloudCodeClient';
 import { CatalogModel, ModelCatalog } from './upstream/modelCatalog';
 import { resolveUserAgent } from './upstream/userAgent';
@@ -61,7 +61,9 @@ export function activate(context: vscode.ExtensionContext): void {
   void resolveUserAgent();
 
   const history = new QuotaHistory(context.globalState);
-  const store = new AccountStore(context.globalState, context.secrets);
+  // The active account lives in workspaceState so each window keeps its own.
+  const store = new AccountStore(context.globalState, context.secrets, context.workspaceState);
+  void store.claimActiveId();
   const accounts = new AccountManager(store, history);
 
   const catalog = new ModelCatalog(accounts);
@@ -76,7 +78,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const chatProvider = new AntigravityChatProvider(catalog, lease, client);
   chatProvider.setPublished(context.globalState.get<boolean>(COPILOT_PUBLISH_KEY) !== false);
   const accountsView = new AccountsViewProvider(context.extensionUri, accounts, history);
-  const statusBar = new AccountStatusBar(accounts);
 
   accountsView.setStatusProvider(async () => {
     // Copilot is not a config-file integration: the models are published to
@@ -142,18 +143,59 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   /**
-   * Codex reads its key from the environment, and VS Code only picks up new
-   * user variables when it is started fresh. Seeding the host process on every
-   * activation means a window reload is enough after wiring Codex up.
+   * Hand the agents this window launches what they read from its environment,
+   * and keep their configs pointed at a gateway that answers.
+   *
+   * Claude Code and Codex run as children of this extension host (or of its
+   * terminals), so what is set here reaches them and no other window. The
+   * window key goes out as a header on every request, which is what keeps each
+   * project on the account its own window chose. Codex also reads its key from
+   * the environment, and VS Code only picks up new user variables when it is
+   * started fresh, so seeding it here makes a window reload enough.
    */
-  const seedCodexEnv = async (): Promise<void> => {
-    const endpoint = gateway.endpoint();
-    if (!endpoint) {
-      return;
-    }
-    const status = await codex.getStatus();
-    if (status.active) {
-      codex.seedProcessEnv(endpoint.apiKey);
+  const userClaudeHeaders = process.env[CLAUDE_HEADERS_ENV];
+  const terminalEnv = context.environmentVariableCollection;
+  terminalEnv.description =
+    'Names this window to Antigravity Maestro, so Claude Code and Codex run on the account it chose';
+  process.env[WINDOW_ENV] = accounts.windowKey;
+  terminalEnv.replace(WINDOW_ENV, accounts.windowKey);
+
+  const seedAgentEnv = async (): Promise<void> => {
+    try {
+      const [claudeStatus, codexStatus] = await Promise.all([claudeCode.getStatus(), codex.getStatus()]);
+
+      const headers = withWindowHeader(
+        userClaudeHeaders,
+        claudeStatus.active ? accounts.windowKey : undefined,
+      );
+      if (headers === undefined) {
+        delete process.env[CLAUDE_HEADERS_ENV];
+      } else {
+        process.env[CLAUDE_HEADERS_ENV] = headers;
+      }
+      if (claudeStatus.active && headers !== undefined) {
+        terminalEnv.replace(CLAUDE_HEADERS_ENV, headers);
+      } else {
+        terminalEnv.delete(CLAUDE_HEADERS_ENV);
+      }
+
+      const endpoint = gateway.endpoint();
+      if (!endpoint) {
+        return;
+      }
+      let changed = false;
+      if (codexStatus.active) {
+        codex.seedProcessEnv(endpoint.apiKey);
+        changed = (await codex.syncEndpoint(endpoint)) || changed;
+      }
+      if (claudeStatus.active) {
+        changed = (await claudeCode.syncEndpoint(endpoint)) || changed;
+      }
+      if (changed) {
+        void accountsView.postState();
+      }
+    } catch (error) {
+      Logger.warn('Could not prepare the agent environment', error);
     }
   };
 
@@ -162,7 +204,6 @@ export function activate(context: vscode.ExtensionContext): void {
     accounts,
     gateway,
     accountsView,
-    statusBar,
     vscode.window.registerWebviewViewProvider(AccountsViewProvider.viewType, accountsView, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -177,7 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     gateway.onDidChange(() => {
       void accountsView.postState();
-      void seedCodexEnv();
+      void seedAgentEnv();
     }),
   );
 
@@ -190,6 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
     claudeCode,
     codex,
     integrations,
+    seedAgentEnv,
   });
 
   accounts.startAutoRefresh();
@@ -209,21 +251,20 @@ export function activate(context: vscode.ExtensionContext): void {
         Logger.info('Gateway port changed — restarting');
         await gateway.restart();
         vscode.window.showInformationMessage(
-          'Antigravity Maestro: gateway restarted. Re-apply the model in Claude Code / Codex so they use the new port.',
+          'Antigravity Maestro: gateway restarted on the new port. Claude Code and Codex, where wired, now point at it — restart their running sessions to pick it up.',
         );
       }
     }),
   );
 
   if (Config.gatewayAutoStart()) {
-    gateway
-      .start()
-      .then(() => seedCodexEnv())
-      .catch((error) => {
-        Logger.error('Gateway failed to start', error);
-        vscode.window.showWarningMessage(`Antigravity Maestro: ${describe(error)}`);
-      });
+    gateway.start().catch((error) => {
+      Logger.error('Gateway failed to start', error);
+      vscode.window.showWarningMessage(`Antigravity Maestro: ${describe(error)}`);
+    });
   }
+  // The gateway re-seeds once it is up; this covers a gateway left off.
+  void seedAgentEnv();
 
   if (accounts.list().length > 0) {
     void accounts.refreshAllQuotas();
@@ -246,6 +287,8 @@ interface CommandDeps {
   claudeCode: ClaudeCodeIntegration;
   codex: CodexIntegration;
   integrations: AgentIntegration[];
+  /** Re-seed what the agents read from this window's environment. */
+  seedAgentEnv: () => Promise<void>;
 }
 
 function registerCommands(context: vscode.ExtensionContext, deps: CommandDeps): void {
@@ -337,11 +380,12 @@ function registerCommands(context: vscode.ExtensionContext, deps: CommandDeps): 
     applyToAgent(claudeCode, 'Claude Code', deps),
   );
   register('antigravityMaestro.claudeCode.restore', () =>
-    restoreAgent(claudeCode, 'Claude Code', accountsView),
+    restoreAgent(claudeCode, 'Claude Code', deps),
   );
   register('antigravityMaestro.claudeCode.forceRestore', async () => {
     await claudeCode.forceRestore();
     void accountsView.postState();
+    await deps.seedAgentEnv();
     await promptReload('Claude Code force-restored from backup.', 'Claude Code');
   });
   register('antigravityMaestro.copilot.setup', () =>
@@ -357,7 +401,7 @@ function registerCommands(context: vscode.ExtensionContext, deps: CommandDeps): 
     restoreUtilityModel(context, accountsView),
   );
   register('antigravityMaestro.codex.apply', () => applyToAgent(codex, 'Codex', deps));
-  register('antigravityMaestro.codex.restore', () => restoreAgent(codex, 'Codex', accountsView));
+  register('antigravityMaestro.codex.restore', () => restoreAgent(codex, 'Codex', deps));
 
   register('antigravityMaestro.showStatus', async () => {
     const lines: string[] = [];
@@ -695,6 +739,7 @@ async function applyToAgent(
   });
 
   void deps.accountsView.postState();
+  await deps.seedAgentEnv();
   const background =
     smallFast && smallFast !== model.id
       ? ` Background tasks use ${deps.catalog.resolve(smallFast)?.displayName ?? smallFast}.`
@@ -764,10 +809,11 @@ async function pickBackgroundModel(
 async function restoreAgent(
   integration: AgentIntegration,
   label: string,
-  accountsView: AccountsViewProvider,
+  deps: CommandDeps,
 ): Promise<void> {
   const status = await integration.restore();
-  void accountsView.postState();
+  void deps.accountsView.postState();
+  await deps.seedAgentEnv();
   await promptReload(`${label} restored to its own defaults. ${status.detail ?? ''}`.trim(), label);
 }
 

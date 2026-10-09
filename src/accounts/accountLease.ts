@@ -83,6 +83,8 @@ const MAX_SESSIONS = 500;
 
 interface SessionBinding {
   accountId: string;
+  /** When the conversation moved onto this account. */
+  since: number;
   lastUsed: number;
 }
 
@@ -142,12 +144,17 @@ export class AccountLease {
    *
    * `session` names the conversation the request belongs to, when the client
    * says; its requests stay on one account while that account can serve them.
+   *
+   * `window` names the VS Code window the request came from, when it is not
+   * this one: it is served from the account that window chose, so a project
+   * keeps its account whichever window's gateway its agent reached.
    */
   async run<T>(
     requestedModel: string,
     execute: (context: LeaseContext) => Promise<T>,
     signal?: AbortSignal,
     session?: string,
+    window?: string,
   ): Promise<T> {
     let lastError: unknown;
     let waited = false;
@@ -155,12 +162,13 @@ export class AccountLease {
 
     for (;;) {
       const candidates = this.preferSession(
-        this.orderCandidates(requestedModel),
+        this.orderCandidates(requestedModel, window),
         requestedModel,
         session,
+        window,
       );
       if (candidates.length > 0) {
-        const outcome = await this.tryCandidates(requestedModel, candidates, execute, session);
+        const outcome = await this.tryCandidates(requestedModel, candidates, execute, session, window);
         if (outcome.served) {
           return outcome.result as T;
         }
@@ -189,7 +197,7 @@ export class AccountLease {
     // the user gets a sentence instead of a 429 stack trace.
     const retryAfter = this.shortestCooldown(requestedModel);
     if (retryAfter !== undefined || lastError === undefined) {
-      throw new NoAccountAvailableError(this.explainNoCandidates(requestedModel), retryAfter);
+      throw new NoAccountAvailableError(this.explainNoCandidates(requestedModel, window), retryAfter);
     }
     throw lastError;
   }
@@ -203,6 +211,7 @@ export class AccountLease {
     candidates: AccountMetadata[],
     execute: (context: LeaseContext) => Promise<T>,
     session?: string,
+    window?: string,
   ): Promise<{ served: boolean; result?: T; error?: unknown; retired?: boolean }> {
     let lastError: unknown;
     const strikes: RateLimitStrike[] = [];
@@ -238,7 +247,7 @@ export class AccountLease {
         // it would flip the active account back and forth between parallel
         // conversations on every request, and redraw the UI each time.
         if (account.id !== bound) {
-          await this.promoteIfRotated(account);
+          await this.promoteIfRotated(account, window);
         }
         this.bindSession(session, account.id);
         return { served: true, result };
@@ -560,8 +569,8 @@ export class AccountLease {
    * it can serve the model — rotation is a fallback for when it cannot, not a
    * load balancer that overrides the user's choice.
    */
-  private orderCandidates(requestedModel: string): AccountMetadata[] {
-    const active = this.accounts.getActive();
+  private orderCandidates(requestedModel: string, window?: string): AccountMetadata[] {
+    const active = this.accounts.getActive(window);
     const strategy = Config.rotationStrategy();
 
     if (strategy === 'manual') {
@@ -616,12 +625,17 @@ export class AccountLease {
     candidates: AccountMetadata[],
     requestedModel: string,
     session: string | undefined,
+    window?: string,
   ): AccountMetadata[] {
     const binding = session ? this.sessions.get(session) : undefined;
     if (!binding) {
       return candidates;
     }
-    if (Date.now() - binding.lastUsed > SESSION_TTL_MS) {
+    // An account picked by hand since outranks the one the conversation was
+    // on. This window's picks clear the bindings outright; another window's
+    // only reach here through the account it published.
+    const chosenAt = this.accounts.chosenAt?.(window) ?? 0;
+    if (Date.now() - binding.lastUsed > SESSION_TTL_MS || chosenAt > binding.since) {
       this.sessions.delete(session!);
       return candidates;
     }
@@ -638,8 +652,14 @@ export class AccountLease {
     if (!session) {
       return;
     }
+    const previous = this.sessions.get(session);
+    const now = Date.now();
     this.sessions.delete(session);
-    this.sessions.set(session, { accountId, lastUsed: Date.now() });
+    this.sessions.set(session, {
+      accountId,
+      since: previous?.accountId === accountId ? previous.since : now,
+      lastUsed: now,
+    });
     if (this.sessions.size <= MAX_SESSIONS) {
       return;
     }
@@ -734,18 +754,20 @@ export class AccountLease {
   }
 
   /** Make a rotated-to account the active one so the UI matches reality. */
-  private async promoteIfRotated(account: AccountMetadata): Promise<void> {
+  private async promoteIfRotated(account: AccountMetadata, window?: string): Promise<void> {
     if (Config.rotationStrategy() === 'manual') {
       return;
     }
-    const active = this.accounts.getActive();
+    const active = this.accounts.getActive(window);
     if (active?.id !== account.id) {
-      Logger.info(`Switched active account to ${account.email}`);
-      await this.accounts.setActive(account.id, false);
+      Logger.info(
+        `Switched active account to ${account.email}` + (window ? ` for window ${window}` : ''),
+      );
+      await this.accounts.setActive(account.id, false, window);
     }
   }
 
-  private explainNoCandidates(requestedModel: string): string {
+  private explainNoCandidates(requestedModel: string, window?: string): string {
     const all = this.accounts.list();
     if (all.length === 0) {
       return 'No Google account has been added yet — run "Antigravity Maestro: Add Google Account".';
@@ -755,7 +777,7 @@ export class AccountLease {
     }
     // With rotation off the request cannot move to the account that has the
     // model, and "no quota" would send the user looking at the wrong number.
-    const active = this.accounts.getActive();
+    const active = this.accounts.getActive(window);
     if (
       Config.rotationStrategy() === 'manual' &&
       active &&

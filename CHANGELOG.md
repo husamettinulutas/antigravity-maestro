@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **Each window keeps its own account.** Picking an account in one VS Code
+  window used to move every other open window to it, because the choice was
+  stored where all windows share it. Each window and project folder now keeps
+  its own account, so two or three projects can run on different accounts
+  side by side.
+- **Claude Code and Codex follow their window's account.** Each window sets
+  its name in the environment of the agents it launches, and they send it
+  with every request. Whichever window's gateway answers, the request runs on
+  the account that window chose. Codex needs **Use model** once more to add
+  the header; the extension updates an existing Codex config on its own.
+- **One gateway address for every window.** A window that cannot bind the
+  preferred port no longer hands agents its fallback port. It gives them the
+  preferred address while another window's gateway answers there, and takes
+  the port over when that window closes. A config left pointing at a port
+  that no longer answers is re-pointed.
+- **No blur over the panel when a tooltip opens.** Hovering **Use model**
+  made Chromium redraw the blurred cards in stale strips. The cards no longer
+  blur what is behind them; nothing scrolled under them anyway.
+- **The status bar item is gone.** The panel shows the same account and
+  quota with more detail.
+
 ## 1.2.0
 
 - **A redesigned accounts panel.** The account serving right now leads the

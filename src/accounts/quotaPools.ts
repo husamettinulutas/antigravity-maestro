@@ -72,48 +72,6 @@ export function quotaPools<T extends ModelQuota>(models: T[]): QuotaPool<T>[] {
     );
 }
 
-/**
- * The tightest pool of each vendor family, in family order — what a glance at
- * the status bar should answer: how much Claude and how much Gemini is left.
- */
-export function headlinePools<T extends ModelQuota>(models: T[]): QuotaPool<T>[] {
-  const tightest = new Map<string, QuotaPool<T>>();
-
-  for (const pool of quotaPools(models)) {
-    const family = modelFamily(pool.model.modelId);
-    const current = tightest.get(family);
-    if (!current || pool.model.percentage < current.model.percentage) {
-      tightest.set(family, pool);
-    }
-  }
-
-  return [...tightest.entries()]
-    .sort(([a], [b]) => familyRank(a) - familyRank(b))
-    .map(([, pool]) => pool);
-}
-
-/**
- * Short name for a pool, e.g. "Opus 5.5", "Gemini", "GPT-OSS".
- *
- * Claude carries its version because accounts on different plans are offered
- * different ones, and "Opus 100%" said nothing about which Opus was left.
- */
-export function poolLabel(model: ModelQuota): string {
-  const tier = model.modelId.match(/^claude-(opus|sonnet|haiku)/);
-  if (tier) {
-    const name = tier[1].charAt(0).toUpperCase() + tier[1].slice(1);
-    const version = claudeVersion(model.modelId);
-    return version ? `${name} ${version.label}` : name;
-  }
-  if (/^gemini/.test(model.modelId)) {
-    return 'Gemini';
-  }
-  if (/^gpt-oss/.test(model.modelId)) {
-    return 'GPT-OSS';
-  }
-  return (model.displayName ?? model.modelId).split(/[\s-]/)[0];
-}
-
 function pickRepresentative<T extends ModelQuota>(members: T[]): T {
   const rank = (model: T) => {
     const index = REPRESENTATIVE_PRIORITY.findIndex((pattern) => pattern.test(model.modelId));

@@ -48,9 +48,17 @@ export class AccountManager implements vscode.Disposable {
     return this.store.get(accountId);
   }
 
-  /** The account requests use by default. Falls back to the first usable one. */
-  getActive(): AccountMetadata | undefined {
-    const activeId = this.store.getActiveId();
+  /** Names this window to the gateways of every window. */
+  get windowKey(): string {
+    return this.store.windowKey;
+  }
+
+  /**
+   * The account requests from `window` use by default — this window when it
+   * is left out. Falls back to the first usable one.
+   */
+  getActive(window?: string): AccountMetadata | undefined {
+    const activeId = this.store.getActiveId(window);
     if (activeId) {
       return this.store.get(activeId);
     }
@@ -66,13 +74,24 @@ export class AccountManager implements vscode.Disposable {
     this.onDidChangeEmitter.fire();
   }
 
-  /** Make `accountId` the active account; `byUser` is false when rotation moved it. */
-  async setActive(accountId: string, byUser = true): Promise<void> {
-    await this.store.setActiveId(accountId);
+  /**
+   * Make `accountId` the active account of `window` — this one when it is left
+   * out. `byUser` is false when rotation moved it.
+   */
+  async setActive(accountId: string, byUser = true, window?: string): Promise<void> {
+    await this.store.setActiveId(accountId, byUser, window);
+    if (window !== undefined && window !== this.store.windowKey) {
+      return;
+    }
     this.onDidChangeEmitter.fire();
     if (byUser) {
       this.onDidChooseActiveEmitter.fire(accountId);
     }
+  }
+
+  /** When the user last picked `window`'s account by hand. */
+  chosenAt(window?: string): number | undefined {
+    return this.store.chosenAt(window);
   }
 
   // ── Sign-in ────────────────────────────────────────────────────────────────

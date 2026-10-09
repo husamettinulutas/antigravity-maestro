@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { headlinePools, poolLabel, quotaPools } from '../accounts/quotaPools';
+import { quotaPools } from '../accounts/quotaPools';
 import { ModelQuota } from '../accounts/types';
 
 const CLAUDE_RESET = '2026-08-22T03:17:00Z';
@@ -66,16 +66,7 @@ test('quota pools: a fresh account still shows every family separately', () => {
   );
 });
 
-test('headline pools: one reading per vendor family, tightest first', () => {
-  const headline = headlinePools(MODELS).map(
-    (pool) => `${poolLabel(pool.model)} ${pool.model.percentage}%`,
-  );
-
-  assert.deepEqual(headline, ['Opus 4.6 82%', 'Gemini 97%', 'GPT-OSS 82%']);
-  assert.deepEqual(headline.slice(0, 2), ['Opus 4.6 82%', 'Gemini 97%']);
-});
-
-test('pool label: Claude is named with its version, the newest one fronting the pool', () => {
+test('quota pools: the newest Claude version fronts the pool', () => {
   const pools = quotaPools([
     model('claude-opus-4-6-thinking', 100, CLAUDE_RESET),
     model('claude-opus-5-5-high', 100, CLAUDE_RESET),
@@ -84,10 +75,6 @@ test('pool label: Claude is named with its version, the newest one fronting the 
 
   assert.equal(pools.length, 1);
   assert.equal(pools[0].model.modelId, 'claude-opus-5-5-high');
-  assert.equal(poolLabel(pools[0].model), 'Opus 5.5');
-  assert.equal(poolLabel(model('claude-opus-4-6-thinking', 1, '')), 'Opus 4.6');
-  // A dated snapshot's date is not a minor version.
-  assert.equal(poolLabel(model('claude-sonnet-4-20250514', 1, '')), 'Sonnet 4');
 });
 
 test("quota pools: the model the Antigravity client lists first fronts the pool", () => {

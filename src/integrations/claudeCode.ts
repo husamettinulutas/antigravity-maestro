@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { isLiveGateway } from '../gateway/probe';
 import { Config } from '../utils/config';
 import { Logger } from '../utils/logger';
 import { AgentIntegration, ApplyOptions, GatewayEndpoint } from './agentIntegration';
@@ -181,6 +182,39 @@ export class ClaudeCodeIntegration implements AgentIntegration {
       configPath: settingsPath,
       detail,
     };
+  }
+
+  /**
+   * Point a settings file wired to a gateway that is gone at this window's.
+   * Only a file carrying this gateway's key is touched — a base URL pointing
+   * at another local proxy is the user's own. Returns true when it changed.
+   */
+  async syncEndpoint(endpoint: GatewayEndpoint): Promise<boolean> {
+    const settingsPath = this.settingsPath();
+    let settings: ClaudeSettings | undefined;
+    try {
+      settings = readJsonFile<ClaudeSettings>(settingsPath);
+    } catch {
+      return false;
+    }
+    const env = settings?.env;
+    const configured = env?.ANTHROPIC_BASE_URL;
+    if (
+      !settings ||
+      !env ||
+      !configured ||
+      configured === endpoint.baseUrl ||
+      env.ANTHROPIC_AUTH_TOKEN !== endpoint.apiKey ||
+      (await isLiveGateway(configured, endpoint.apiKey))
+    ) {
+      return false;
+    }
+
+    env.ANTHROPIC_BASE_URL = endpoint.baseUrl;
+    writeJsonFileAtomic(settingsPath, settings);
+    await this.updateVsCodeSettings(endpoint);
+    Logger.info(`Claude Code re-pointed from ${configured} to ${endpoint.baseUrl} in ${settingsPath}`);
+    return true;
   }
 
   async restore(): Promise<IntegrationStatus> {

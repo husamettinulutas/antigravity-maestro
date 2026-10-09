@@ -25,6 +25,7 @@ import {
   retryAfter,
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
+import { WINDOW_HEADER } from '../integrations/window';
 import { Logger } from '../utils/logger';
 
 /** Refuse request bodies larger than this — a runaway client would exhaust memory. */
@@ -71,6 +72,8 @@ export interface GatewayDeps {
 export class GatewayServer {
   private server: http.Server | undefined;
   private port = 0;
+  /** Further ports served alongside the first; see `listenAlso`. */
+  private readonly extra = new Map<number, http.Server>();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -91,6 +94,31 @@ export class GatewayServer {
       return this.port;
     }
 
+    const server = await this.listen(port);
+    this.server = server;
+    this.port = (server.address() as { port: number }).port;
+    Logger.info(`Gateway listening on ${this.url}`);
+    return this.port;
+  }
+
+  /**
+   * Serve `port` as well. The gateway keeps its first port, so an agent
+   * already pointed there is not cut off mid-turn.
+   */
+  async listenAlso(port: number): Promise<void> {
+    if (!this.server || port === this.port || this.extra.has(port)) {
+      return;
+    }
+    this.extra.set(port, await this.listen(port));
+    Logger.info(`Gateway also listening on http://127.0.0.1:${port}`);
+  }
+
+  /** True when the gateway answers on `port`. */
+  listensOn(port: number): boolean {
+    return this.server !== undefined && (port === this.port || this.extra.has(port));
+  }
+
+  private async listen(port: number): Promise<http.Server> {
     const server = http.createServer((req, res) => {
       this.handle(req, res).catch((error) => {
         Logger.error('Gateway handler crashed', error);
@@ -112,23 +140,25 @@ export class GatewayServer {
         resolve();
       });
     });
-
-    this.server = server;
-    this.port = (server.address() as { port: number }).port;
-    Logger.info(`Gateway listening on ${this.url}`);
-    return this.port;
+    return server;
   }
 
   async stop(): Promise<void> {
-    const server = this.server;
+    const servers = [...(this.server ? [this.server] : []), ...this.extra.values()];
     this.server = undefined;
-    if (!server) {
+    this.extra.clear();
+    if (servers.length === 0) {
       return;
     }
-    await new Promise<void>((resolve) => {
-      server.closeAllConnections?.();
-      server.close(() => resolve());
-    });
+    await Promise.all(
+      servers.map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections?.();
+            server.close(() => resolve());
+          }),
+      ),
+    );
     Logger.info('Gateway stopped');
   }
 
@@ -236,7 +266,7 @@ export class GatewayServer {
 
         const response = await this.generateTurn(request, context, abort.signal, ANTHROPIC_PLACEHOLDER);
         sendJson(res, 200, toAnthropicResponse(response, context.model.id));
-      }, abort.signal, sessionOf(req, body));
+      }, abort.signal, sessionOf(req, body), windowOf(req));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -326,7 +356,7 @@ export class GatewayServer {
 
         const response = await this.generateTurn(request, context, abort.signal);
         sendJson(res, 200, toResponsesResponse(response, context.model.id));
-      }, abort.signal, sessionOf(req, body));
+      }, abort.signal, sessionOf(req, body), windowOf(req));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -373,7 +403,7 @@ export class GatewayServer {
 
         const response = await this.generateTurn(request, context, abort.signal);
         sendJson(res, 200, toChatCompletion(response, context.model.id));
-      }, abort.signal, sessionOf(req, body));
+      }, abort.signal, sessionOf(req, body), windowOf(req));
     } catch (error) {
       this.reportFailure(res, error);
     }
@@ -699,6 +729,17 @@ function sessionOf(req: http.IncomingMessage, body: unknown): string | undefined
     fields?.metadata?.user_id,
   ].find((value): value is string => typeof value === 'string' && value.trim() !== '');
   return key ? `gateway:${key}` : undefined;
+}
+
+/**
+ * The VS Code window an agent runs in, as the header its configuration adds
+ * from the environment that window gave it. Every window runs a gateway and an
+ * agent reaches whichever one its config names, so this is what keeps a
+ * project on the account its own window chose.
+ */
+function windowOf(req: http.IncomingMessage): string | undefined {
+  const value = header(req, WINDOW_HEADER)?.trim();
+  return value ? value : undefined;
 }
 
 // ── Settling a silent turn ────────────────────────────────────────────────────

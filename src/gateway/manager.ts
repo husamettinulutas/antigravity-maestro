@@ -6,17 +6,31 @@ import { ModelCatalog } from '../upstream/modelCatalog';
 import { Config } from '../utils/config';
 import { randomToken } from '../utils/ids';
 import { Logger } from '../utils/logger';
+import { isLiveGateway } from './probe';
 import { GatewayServer } from './server';
 
 const API_KEY_SECRET = 'antigravityMaestro.gatewayKey';
 
+/** How often a window off the preferred port checks whether it came free. */
+const STANDBY_INTERVAL_MS = 15_000;
+
 /**
  * Owns the gateway's lifecycle: its bearer key, start/stop, and restarts when
  * the configured port changes.
+ *
+ * Every VS Code window runs its own gateway, and only one of them can hold the
+ * preferred port. The others come up on the next free one, but hand agents the
+ * preferred address while a Maestro gateway answers there — any window's
+ * gateway serves any window, so agent configs never have to name a port that
+ * dies with its window. When that window closes, the next one to notice takes
+ * the port over, and agents keep working without a config change.
  */
 export class GatewayManager implements vscode.Disposable {
   private server: GatewayServer | undefined;
   private apiKey: string | undefined;
+  /** The preferred port's address, while another window's gateway answers there. */
+  private sharedUrl: string | undefined;
+  private standby: NodeJS.Timeout | undefined;
   private readonly onDidChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onDidChangeEmitter.event;
 
@@ -36,7 +50,7 @@ export class GatewayManager implements vscode.Disposable {
     if (!this.server?.running || !this.apiKey) {
       return undefined;
     }
-    return { baseUrl: this.server.url, apiKey: this.apiKey };
+    return { baseUrl: this.sharedUrl ?? this.server.url, apiKey: this.apiKey };
   }
 
   /** Start the gateway, or return the running one. */
@@ -55,19 +69,56 @@ export class GatewayManager implements vscode.Disposable {
 
     const preferred = Config.gatewayPort();
     const bound = await listenWithFallback(server, preferred);
+    this.server = server;
     if (bound !== preferred) {
       Logger.warn(`Port ${preferred} was busy; the gateway is on ${bound} instead`);
+      await this.claimPreferredPort(preferred);
+      this.standby = setInterval(() => void this.claimPreferredPort(preferred), STANDBY_INTERVAL_MS);
+      this.standby.unref?.();
     }
 
-    this.server = server;
     this.onDidChangeEmitter.fire();
     return this.endpoint()!;
   }
 
   async stop(): Promise<void> {
+    clearInterval(this.standby);
+    this.standby = undefined;
+    this.sharedUrl = undefined;
     await this.server?.stop();
     this.server = undefined;
     this.onDidChangeEmitter.fire();
+  }
+
+  /**
+   * Serve the preferred port once it is free, or point agents at the gateway
+   * another window runs there.
+   */
+  private async claimPreferredPort(preferred: number): Promise<void> {
+    const server = this.server;
+    if (!server?.running || !this.apiKey) {
+      return;
+    }
+    const preferredUrl = `http://127.0.0.1:${preferred}`;
+    let shared: string | undefined;
+
+    try {
+      await server.listenAlso(preferred);
+      Logger.info(`Port ${preferred} came free; this window's gateway took it over`);
+      clearInterval(this.standby);
+      this.standby = undefined;
+      shared = preferredUrl;
+    } catch (error) {
+      if (!isAddressInUse(error)) {
+        Logger.warn(`Could not take over port ${preferred}`, error);
+      }
+      shared = (await isLiveGateway(preferredUrl, this.apiKey)) ? preferredUrl : undefined;
+    }
+
+    if (this.server === server && shared !== this.sharedUrl) {
+      this.sharedUrl = shared;
+      this.onDidChangeEmitter.fire();
+    }
   }
 
   async restart(): Promise<GatewayEndpoint> {
@@ -97,6 +148,7 @@ export class GatewayManager implements vscode.Disposable {
   }
 
   dispose(): void {
+    clearInterval(this.standby);
     void this.stop();
     this.onDidChangeEmitter.dispose();
   }

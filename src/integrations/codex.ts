@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { Config } from '../utils/config';
 import { Logger } from '../utils/logger';
+import { isLiveGateway } from '../gateway/probe';
 import { AgentIntegration, ApplyOptions, GatewayEndpoint } from './agentIntegration';
 import {
   IntegrationStatus,
@@ -14,6 +15,7 @@ import {
   tomlEscape,
   writeTextFileAtomic,
 } from './shared';
+import { WINDOW_ENV, WINDOW_HEADER } from './window';
 
 /** Env var Codex reads the gateway key from (referenced by env_key in config.toml). */
 export const CODEX_ENV_KEY = 'ANTIGRAVITY_MAESTRO_API_KEY';
@@ -139,17 +141,8 @@ export class CodexIntegration implements AgentIntegration {
     let content = removeProviderSection(existing ?? '');
     content = stripTopLevelKeys(content);
 
-    // 2) Append a fresh provider section. Codex only speaks the Responses wire
-    //    format to custom providers, which the gateway implements.
-    const section = [
-      `[model_providers.${PROVIDER_ID}]`,
-      'name = "Antigravity Maestro"',
-      `base_url = "${tomlEscape(`${endpoint.baseUrl}/v1`)}"`,
-      `env_key = "${CODEX_ENV_KEY}"`,
-      'wire_api = "responses"',
-    ].join('\n');
-    content =
-      content.trim() === '' ? `${section}\n` : `${content.replace(/\n*$/, '\n')}\n${section}\n`;
+    // 2) Append a fresh provider section.
+    content = appendProviderSection(content, endpoint);
 
     // 3) Top-level keys must come before any [section] header, and are only
     //    honoured in the user-level config. Codex sends `reasoning` — the
@@ -183,6 +176,37 @@ export class CodexIntegration implements AgentIntegration {
     }
 
     return { target: this.target, installed: true, active: true, modelId, configPath, detail };
+  }
+
+  /**
+   * Bring an applied provider section up to date: point it at this window's
+   * gateway when the one it names is gone, and add the window header to a
+   * section written before Codex sent one. Returns true when the file changed.
+   */
+  async syncEndpoint(endpoint: GatewayEndpoint): Promise<boolean> {
+    const configPath = this.configPath();
+    const content = readTextFile(configPath);
+    const range = content === undefined ? undefined : findProviderSection(content);
+    if (content === undefined || !range) {
+      return false;
+    }
+    const section = content.slice(range.start, range.end);
+    const configured = section.match(/^\s*base_url\s*=\s*"([^"]*)"/m)?.[1]?.replace(/\/v1\/?$/, '');
+    const stale =
+      configured !== undefined &&
+      configured !== endpoint.baseUrl &&
+      !(await isLiveGateway(configured, endpoint.apiKey));
+    if (section.includes(WINDOW_ENV) && !stale) {
+      return false;
+    }
+
+    const baseUrl = stale || configured === undefined ? endpoint.baseUrl : configured;
+    writeTextFileAtomic(
+      configPath,
+      appendProviderSection(removeProviderSection(content), { ...endpoint, baseUrl }),
+    );
+    Logger.info(`Codex provider brought up to date in ${configPath} (${baseUrl})`);
+    return true;
   }
 
   // ── Restore ────────────────────────────────────────────────────────────────
@@ -327,6 +351,25 @@ function findProviderSection(content: string): { start: number; end: number } | 
   }
 
   return start === -1 ? undefined : { start, end: Math.min(end, content.length) };
+}
+
+/**
+ * `content` with this integration's provider section appended. Codex only
+ * speaks the Responses wire format to custom providers, which the gateway
+ * implements. The window header comes from the variable each VS Code window
+ * sets, so the gateway serves the account that window chose; Codex leaves it
+ * out when the variable is unset.
+ */
+function appendProviderSection(content: string, endpoint: GatewayEndpoint): string {
+  const section = [
+    `[model_providers.${PROVIDER_ID}]`,
+    'name = "Antigravity Maestro"',
+    `base_url = "${tomlEscape(`${endpoint.baseUrl}/v1`)}"`,
+    `env_key = "${CODEX_ENV_KEY}"`,
+    `env_http_headers = { "${WINDOW_HEADER}" = "${WINDOW_ENV}" }`,
+    'wire_api = "responses"',
+  ].join('\n');
+  return content.trim() === '' ? `${section}\n` : `${content.replace(/\n*$/, '\n')}\n${section}\n`;
 }
 
 function removeProviderSection(content: string): string {
