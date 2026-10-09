@@ -86,7 +86,10 @@ export interface AccessToken {
   expiresAt: number;
 }
 
-/** Token spend recorded for one upstream request. */
+/**
+ * Token spend reported by one upstream request. It is what gets recorded, not
+ * what gets stored: each one is added into its hour's {@link UsageBucket}.
+ */
 export interface UsageSample {
   at: number;
   accountId: string;
@@ -94,6 +97,23 @@ export interface UsageSample {
   inputTokens: number;
   outputTokens: number;
   thoughtTokens?: number;
+}
+
+/**
+ * Token spend summed over one clock hour, for one account and model. Hours
+ * rather than requests: a busy day is thousands of requests, and keeping each
+ * one either grows globalState without bound or, capped, quietly drops the
+ * oldest days that a month view would then under-report.
+ */
+export interface UsageBucket {
+  /** Start of the UTC hour, epoch ms. */
+  at: number;
+  accountId: string;
+  modelId: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  thoughtTokens: number;
 }
 
 /** A quota reading kept for the history chart. */

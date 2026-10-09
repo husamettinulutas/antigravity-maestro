@@ -3,7 +3,19 @@
   const vscode = acquireVsCodeApi();
 
   /** Last state pushed by the extension. */
-  let state = { accounts: [], usage: [], history: [] };
+  let state = { accounts: [], usage: { ranges: {}, days: [] }, history: [] };
+
+  // The spans the Usage tab can show; the extension sends figures for all of
+  // them, so switching is instant. `phrase` finishes "Nothing served …".
+  const RANGES = [
+    { key: 'hour', phrase: 'this hour' },
+    { key: 'today', phrase: 'today' },
+    { key: 'yesterday', phrase: 'yesterday' },
+    { key: 'week', phrase: 'in the last 7 days' },
+    { key: 'month', phrase: 'in the last 30 days' },
+    { key: 'all', phrase: 'yet' },
+  ];
+  const RANGE_KEYS = RANGES.map((range) => range.key);
 
   // View preferences survive reloads. Bumping the version drops choices made
   // under an older layout. Version 5 starts everything folded except the
@@ -15,6 +27,8 @@
   const openModelLists = new Set(restorable.openModelLists || []);
   /** null = decide from the data: open until something is wired, then fold. */
   let connectionsOpen = typeof restorable.connectionsOpen === 'boolean' ? restorable.connectionsOpen : null;
+  /** Defaults to everything, so the first look after an update matches the last. */
+  let usageRange = RANGE_KEYS.includes(restorable.usageRange) ? restorable.usageRange : 'all';
   let currentTab = 'accounts';
 
   /** Entrance motion runs once per session, never on the frequent re-pushes. */
@@ -52,6 +66,8 @@
     usageBody: document.getElementById('usage-body'),
     usageCount: document.getElementById('usage-count'),
     usageEmpty: document.getElementById('usage-empty'),
+    usageRanges: document.getElementById('usage-ranges'),
+    usageActions: document.getElementById('usage-actions'),
     menu: document.getElementById('menu'),
     refreshAll: document.getElementById('refresh-all'),
   };
@@ -61,6 +77,33 @@
   document.getElementById('add-account').addEventListener('click', () => post('addAccount'));
   document.getElementById('add-account-empty').addEventListener('click', () => post('addAccount'));
   document.getElementById('clear-history').addEventListener('click', () => post('clearHistory'));
+
+  // The range picker is a radio group: one tab stop, arrows move the choice.
+  el.usageRanges.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-range]');
+    if (button) {
+      selectRange(button.dataset.range);
+    }
+  });
+
+  el.usageRanges.addEventListener('keydown', (event) => {
+    const count = RANGE_KEYS.length;
+    const index = RANGE_KEYS.indexOf(usageRange);
+    const next = {
+      ArrowRight: (index + 1) % count,
+      ArrowDown: (index + 1) % count,
+      ArrowLeft: (index - 1 + count) % count,
+      ArrowUp: (index - 1 + count) % count,
+      Home: 0,
+      End: count - 1,
+    }[event.key];
+    if (next === undefined) {
+      return;
+    }
+    event.preventDefault();
+    selectRange(RANGE_KEYS[next]);
+    el.usageRanges.querySelector('[data-range="' + RANGE_KEYS[next] + '"]').focus();
+  });
 
   // The health line sums up Connections, and takes you there.
   el.health.addEventListener('click', () => {
@@ -350,6 +393,7 @@
       openAccounts: [...openAccounts],
       openModelLists: [...openModelLists],
       connectionsOpen,
+      usageRange,
     });
   }
 
@@ -1128,10 +1172,66 @@
 
   // ── Usage ─────────────────────────────────────────────────────────────────
 
+  function selectRange(key) {
+    if (!RANGE_KEYS.includes(key) || key === usageRange) {
+      return;
+    }
+    usageRange = key;
+    savePreferences();
+    renderUsage();
+  }
+
+  function syncRangePicker(visible) {
+    el.usageRanges.classList.toggle('hidden', !visible);
+    el.usageRanges.querySelectorAll('[data-range]').forEach((button) => {
+      const selected = button.dataset.range === usageRange;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-checked', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+  }
+
+  /** The rows a range holds; older extension builds sent one all-time array. */
+  function rangeRows(key) {
+    const usage = state.usage || {};
+    if (Array.isArray(usage)) {
+      return key === 'all' ? usage : [];
+    }
+    const range = (usage.ranges || {})[key];
+    return (range && range.rows) || [];
+  }
+
+  function rowsTokens(rows) {
+    return rows.reduce((sum, row) =>
+      sum + (Number(row.inputTokens) || 0) + (Number(row.thoughtTokens) || 0) + (Number(row.outputTokens) || 0), 0);
+  }
+
+  /** What the headline is counting over, e.g. "today" or "since 14:00". */
+  function rangeCaption(key) {
+    const usage = state.usage || {};
+    const range = (usage.ranges || {})[key] || {};
+    switch (key) {
+      case 'hour':
+        return range.from ? 'since ' + formatTime(range.from) : 'this hour';
+      case 'today':
+        return 'today';
+      case 'yesterday':
+        return 'yesterday';
+      case 'week':
+        return 'last 7 days';
+      case 'month':
+        return 'last 30 days';
+      default:
+        return usage.firstAt ? 'since ' + formatDay(usage.firstAt) : 'all time';
+    }
+  }
+
   function renderUsage() {
-    const rows = state.usage || [];
+    const everything = rangeRows('all');
+    const rows = rangeRows(usageRange);
     const names = modelNames();
-    el.usageEmpty.classList.toggle('hidden', rows.length > 0);
+    el.usageEmpty.classList.toggle('hidden', everything.length > 0);
+    syncRangePicker(everything.length > 0);
 
     // Merge per model across accounts: the question is which models eat tokens.
     const byModel = new Map();
@@ -1171,8 +1271,10 @@
       return account ? localPart(account.email) : id;
     };
 
-    if (rows.length === 0) {
+    if (everything.length === 0) {
       el.usageBody.innerHTML = '';
+    } else if (rows.length === 0) {
+      el.usageBody.innerHTML = quietRange();
     } else {
       const all = totals.input + totals.thinking + totals.output;
       const share = (value) => (all > 0 ? (value / all) * 100 : 0);
@@ -1180,11 +1282,13 @@
       const headline =
         '<section class="uhead glass">' +
         '<div class="uhead-top">' +
-        '<div class="uhead-main"><span class="eyebrow">Tokens served</span>' +
+        '<div class="uhead-main"><span class="eyebrow">Tokens served <span class="uhead-range">· ' +
+        escapeHtml(rangeCaption(usageRange)) + '</span></span>' +
         '<span class="uhead-big tnum" title="' + escapeAttribute(formatNumber(all) + ' tokens') + '">' + formatCompact(all) + '</span></div>' +
         '<div class="uhead-side">' +
         '<span class="uhead-stat"><b class="tnum">' + formatNumber(totals.requests) + '</b> requests</span>' +
         '<span class="uhead-stat"><b class="tnum">' + byAccount.size + '</b> ' + (byAccount.size === 1 ? 'account' : 'accounts') + ' active</span>' +
+        comparison() +
         '</div>' +
         '</div>' +
         '<div class="mix" role="img" aria-label="' + escapeAttribute('Token mix: input ' + Math.round(share(totals.input)) + '%, thinking ' +
@@ -1262,6 +1366,7 @@
 
       el.usageBody.innerHTML =
         headline +
+        dayStrip() +
         '<section class="section"><div class="section-head"><span class="eyebrow">By model</span>' +
         '<span class="section-meta">tokens, largest first</span></div>' +
         '<div class="list glass-quiet">' + modelRows + '</div></section>' +
@@ -1273,8 +1378,95 @@
     }
 
     renderTrends(byAccount);
+    // Offered while anything is left to clear, whichever sections show it.
+    const readings = (state.history || []).some((entry) => entry.points && entry.points.length > 0);
+    el.usageActions.classList.toggle('hidden', everything.length === 0 && !readings);
     applySizes(el.usageBody);
     applySizes(el.trendsSection);
+  }
+
+  /** Today beside yesterday, and the other way round: the comparison people ask for. */
+  function comparison() {
+    const other = { today: 'yesterday', yesterday: 'today' }[usageRange];
+    if (!other) {
+      return '';
+    }
+    const tokens = rowsTokens(rangeRows(other));
+    if (tokens === 0) {
+      return '';
+    }
+    return '<span class="uhead-stat" title="' + escapeAttribute(formatNumber(tokens) + ' tokens ' + other) + '">vs <b class="tnum">' +
+      formatCompact(tokens) + '</b> ' + (other === 'today' ? 'today so far' : 'yesterday') + '</span>';
+  }
+
+  /** A range with no traffic says so once, instead of a page of zeros. */
+  function quietRange() {
+    const phrase = (RANGES.find((range) => range.key === usageRange) || {}).phrase || '';
+    const days = (state.usage && state.usage.days) || [];
+    const lastActive = days.slice().reverse().find((day) => day.tokens > 0);
+    const hint = lastActive
+      ? 'Last traffic ' + (lastActive === days[days.length - 1] ? 'earlier today' : 'on ' + formatDay(lastActive.start)) + '.'
+      : 'Pick a wider range to see earlier traffic.';
+    return '<div class="urange-empty glass-quiet" role="status">' +
+      '<span>Nothing served ' + escapeHtml(phrase) + '.</span>' +
+      '<small>' + escapeHtml(hint) + '</small></div>';
+  }
+
+  /**
+   * One bar per local day, today rightmost, for the ranges that span days.
+   * Today and yesterday get their own colour and a figure underneath, so the
+   * two can be compared without hovering.
+   */
+  function dayStrip() {
+    if (!['week', 'month', 'all'].includes(usageRange)) {
+      return '';
+    }
+    const usage = state.usage || {};
+    const days = usage.days || [];
+    let list;
+    if (usageRange === 'week') {
+      list = days.slice(-7);
+    } else if (usageRange === 'month') {
+      list = days.slice(-30);
+    } else {
+      // From the first day with traffic, but never so few bars it reads as a chart error.
+      const first = days.findIndex((day) => day.tokens > 0);
+      list = days.slice(Math.max(0, Math.min(first < 0 ? days.length : first, days.length - 7)));
+    }
+    if (list.length < 2 || !list.some((day) => day.tokens > 0)) {
+      return '';
+    }
+
+    const max = Math.max(1, ...list.map((day) => day.tokens));
+    const todayIndex = list.length - 1;
+    const bars = list
+      .map((day, index) => {
+        const when = index === todayIndex ? 'Today' : index === todayIndex - 1 ? 'Yesterday' : formatDay(day.start);
+        const label = when + ': ' + formatNumber(day.tokens) + ' tokens, ' + formatNumber(day.requests) + ' ' +
+          (day.requests === 1 ? 'request' : 'requests');
+        const kind = index === todayIndex ? ' is-today' : index === todayIndex - 1 ? ' is-yday' : '';
+        const height = day.tokens > 0 ? Math.max(4, (day.tokens / max) * 100) : 0;
+        return '<i class="db' + kind + (day.tokens === 0 ? ' is-zero' : '') + '" role="listitem" aria-label="' +
+          escapeAttribute(label) + '" title="' + escapeAttribute(label) + '" data-h="' + height.toFixed(1) + '"></i>';
+      })
+      .join('');
+
+    const today = list[todayIndex];
+    const yesterday = list[todayIndex - 1];
+    const meta = usageRange === 'all' && usage.daysTruncated ? 'tokens per day, last ' + list.length + ' days' : 'tokens per day';
+    return (
+      '<section class="section"><div class="section-head"><span class="eyebrow">Day by day</span>' +
+      '<span class="section-meta">' + escapeHtml(meta) + '</span></div>' +
+      '<div class="days glass-quiet">' +
+      // Past ~45 bars a 2px gap would eat most of a narrow sidebar's row.
+      '<div class="dbars' + (list.length > 45 ? ' is-dense' : '') + '" role="list" aria-label="' + escapeAttribute('Tokens per day, ' + formatDay(list[0].start) + ' to today') + '">' + bars + '</div>' +
+      '<div class="days-foot">' +
+      '<span class="days-from">' + escapeHtml(formatDay(list[0].start)) + '</span>' +
+      '<span class="days-keys">' +
+      '<span class="days-key" title="' + escapeAttribute(formatNumber(yesterday.tokens) + ' tokens yesterday') + '"><i class="k-yday"></i>Yesterday <b class="tnum">' + formatCompact(yesterday.tokens) + '</b></span>' +
+      '<span class="days-key" title="' + escapeAttribute(formatNumber(today.tokens) + ' tokens today') + '"><i class="k-today"></i>Today <b class="tnum">' + formatCompact(today.tokens) + '</b></span>' +
+      '</span></div></div></section>'
+    );
   }
 
   function tokenFigure(kind, label, value) {
@@ -1340,8 +1532,12 @@
         }
         const min = clamp(Math.round(latest.min !== undefined ? latest.min : 100), 0, 100);
         const poolName = min >= 100 ? 'all full' : tightFamily ? FAMILY_SHORT[tightFamily] || tightFamily : '';
+        // Follows the range picked above, like every other figure on the tab.
         const usage = byAccount && byAccount.get(entry.accountId);
         const requests = usage ? formatNumber(usage.requests) + ' req' : '';
+        const requestsTitle = usage
+          ? formatNumber(usage.requests) + ' requests, ' + formatNumber(usage.tokens) + ' tokens · ' + rangeCaption(usageRange)
+          : '';
         const staleLabel = account.needsReauth ? 'signed out' : account.lastError ? 'last read failed' : '';
         const sub = stale
           ? '<span class="trow-flag tone-' + (account.needsReauth ? 'warn' : 'low') + '">' + staleLabel + '</span>'
@@ -1357,7 +1553,7 @@
           '<div class="tbars" role="img" aria-label="' + escapeAttribute('Lowest pool over the ' + formatSpan(entry.points[0].at, latest.at)) + '">' + bars + '</div>' +
           '<span class="trow-now"><b class="tnum tone-' + (stale ? 'muted' : toneOf(min)) + '">' + min + '%</b><small>' + escapeHtml(poolName) + '</small></span>' +
           '</div>' +
-          (sub || requests ? '<div class="trow-sub">' + (sub || '<span></span>') + (requests ? '<span class="tnum">' + requests + '</span>' : '') + '</div>' : '') +
+          (sub || requests ? '<div class="trow-sub">' + (sub || '<span></span>') + (requests ? '<span class="tnum" title="' + escapeAttribute(requestsTitle) + '">' + requests + '</span>' : '') + '</div>' : '') +
           '</div>'
         );
       })
@@ -1607,6 +1803,11 @@
 
   function formatTime(timestamp) {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  /** "Tue, 7 Oct" in the viewer's own locale. */
+  function formatDay(timestamp) {
+    return new Date(timestamp).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   function formatNumber(value) {

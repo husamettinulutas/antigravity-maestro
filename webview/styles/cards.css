@@ -2164,3 +2164,197 @@ body.vscode-light .tb.tone-low { background: var(--low); }
 #usage-body > .section:first-child {
   margin-top: 0;
 }
+
+/* Range picker: the tab switch's recessed track at chip size, so it reads as
+   a filter on this tab rather than a second row of tabs. It wraps instead of
+   squeezing when the sidebar is narrow. */
+.ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 12px;
+  border-radius: 9px;
+  background: var(--surface-0);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25), inset 0 0 0 1px var(--line-soft);
+}
+
+body.vscode-light .ranges {
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px var(--line-soft);
+}
+
+.range {
+  flex: 1 1 auto;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  color: var(--text-2);
+  white-space: nowrap;
+  border-radius: 7px;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+
+.range:hover {
+  color: var(--text-1);
+}
+
+.range.active {
+  color: var(--text-1);
+  background: var(--surface-3);
+  box-shadow: var(--edge), 0 1px 3px rgba(0, 0, 0, 0.3), inset 0 0 0 1px var(--line);
+}
+
+body.vscode-light .range.active {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.06), inset 0 0 0 1px var(--line-soft);
+}
+
+/* High contrast has no soft surfaces to lift onto: the choice gets a border. */
+body.vscode-high-contrast .range.active,
+body.vscode-high-contrast-light .range.active {
+  box-shadow: inset 0 0 0 1px var(--vscode-contrastActiveBorder, var(--line-strong));
+}
+
+.uhead-range {
+  color: var(--text-3);
+}
+
+.usage-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px;
+  margin-top: 14px;
+}
+
+/* A range with no traffic: one quiet line, not a page of zeros. */
+.urange-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 16px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: center;
+}
+
+.urange-empty small {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* Day by day: neutral bars like the quota strip; today and yesterday take
+   the brand pair so the comparison is the first thing seen. */
+.days {
+  padding: 12px 14px 10px;
+}
+
+/* Up to 90 bars share a sidebar-wide row, so bars may shrink to a hairline.
+   Should they still not fit, the row is pinned to its right edge and clips
+   the oldest days, never today and yesterday. */
+.dbars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 44px;
+  overflow: hidden;
+}
+
+.dbars.is-dense {
+  gap: 1px;
+}
+
+.db {
+  flex: 1 1 0;
+  min-width: 1px;
+  min-height: 2px;
+  border-radius: 2px 2px 1px 1px;
+  background: color-mix(in oklch, var(--text-1) 40%, var(--surface-1));
+  transition: opacity var(--t-fast);
+}
+
+body.vscode-light .db {
+  background: color-mix(in oklch, var(--text-1) 38%, #fff);
+}
+
+/* An idle day keeps a stub on the baseline, so a gap reads as a day off. */
+.dbars .db.is-zero {
+  background: var(--line-strong);
+}
+
+.dbars .db.is-yday,
+.days-key .k-yday {
+  background: var(--brand-2);
+}
+
+.dbars .db.is-today,
+.days-key .k-today {
+  background: var(--brand-1);
+}
+
+.dbars:hover .db {
+  opacity: 0.45;
+}
+
+.dbars .db:hover {
+  opacity: 1;
+}
+
+body.vscode-high-contrast .db,
+body.vscode-high-contrast-light .db {
+  background: var(--host-fg);
+}
+
+body.vscode-high-contrast-light .db.is-yday,
+body.vscode-high-contrast-light .days-key .k-yday {
+  background: #6d28d9;
+}
+
+body.vscode-high-contrast-light .db.is-today,
+body.vscode-high-contrast-light .days-key .k-today {
+  background: #0e7490;
+}
+
+body.vscode-high-contrast .db.is-yday,
+body.vscode-high-contrast .db.is-today {
+  outline: 1px solid var(--vscode-contrastActiveBorder, var(--line-strong));
+}
+
+.days-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.days-keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-left: auto;
+}
+
+.days-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.days-key i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.days-key b {
+  font-weight: 600;
+  color: var(--text-1);
+}

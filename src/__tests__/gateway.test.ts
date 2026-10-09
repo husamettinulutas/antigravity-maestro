@@ -216,3 +216,59 @@ test('gateway: the model is told the effort Claude Code asked for', async () => 
     await stop();
   }
 });
+
+test('gateway: ultracode is restated last for a Claude Code session that can run workflows', async () => {
+  const { sent, post, context, stop } = await gateway(ANSWER, ANSWER, ANSWER, ANSWER);
+  context.model = {
+    id: 'gemini-3.8-flash-tiered',
+    maxInputTokens: 1_048_576,
+    maxOutputTokens: 65_536,
+    supportsThinking: true,
+    thinkingBudget: 10_000,
+  };
+  const on = {
+    role: 'user',
+    content: [
+      { type: 'text', text: '<system-reminder>\nUltracode is on: optimize for the most exhaustive, correct answer.\n</system-reminder>' },
+      { type: 'text', text: 'refactor the parser' },
+    ],
+  };
+  const ask = (extra: Record<string, unknown>) =>
+    post('/v1/messages', {
+      ...MESSAGES,
+      model: 'gemini-3.8-flash-tiered',
+      system: 'Be brief.',
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'max' },
+      messages: [on],
+      tools: [{ name: 'Workflow' }, { name: 'Read' }],
+      ...extra,
+    });
+  try {
+    await ask({});
+    // A workflow's own agents have no Workflow tool, and are never told to start one.
+    await ask({ tools: [{ name: 'Read' }] });
+    // The user only talking about it is not the mode being on.
+    await ask({ messages: [{ role: 'user', content: 'What is ultracode?' }] });
+    // Claude Code's compaction fork carries the session's tools and history, but may not call tools.
+    await ask({
+      messages: [
+        on,
+        { role: 'assistant', content: 'done' },
+        { role: 'user', content: 'CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nSummarize the conversation.' },
+      ],
+    });
+
+    const parts = sent.map((request) => request.systemInstruction.parts.map((part: any) => part.text));
+    // The client's prompt stays first and the effort note second; the directive comes last.
+    assert.equal(parts[0].length, 3);
+    assert.equal(parts[0][0], 'Be brief.');
+    assert.equal(parts[0][1], 'Reasoning effort for this request: max (thinking budget: 10000 tokens).');
+    assert.match(parts[0][2], /^Ultracode is on for this session/);
+    assert.deepEqual(parts[1], parts[0].slice(0, 2));
+    assert.deepEqual(parts[2], parts[0].slice(0, 2));
+    assert.deepEqual(parts[3], parts[0].slice(0, 2));
+  } finally {
+    await stop();
+  }
+});

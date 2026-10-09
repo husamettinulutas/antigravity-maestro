@@ -25,6 +25,12 @@ import {
   retryAfter,
 } from '../upstream/emptyResponse';
 import { ModelCatalog } from '../upstream/modelCatalog';
+import {
+  UltracodeState,
+  describeUltracode,
+  noteUltracode,
+  ultracodeFor,
+} from '../upstream/ultracode';
 import { WINDOW_HEADER } from '../integrations/window';
 import { Logger } from '../utils/logger';
 
@@ -236,11 +242,13 @@ export class GatewayServer {
     const abort = abortOnClose(res);
 
     try {
+      // Read once: it depends on the conversation, not on the account serving it.
+      const ultracode = ultracodeFor(body);
       await this.deps.lease.run(body.model, async (context) => {
-        const request = this.prepareAnthropicRequest(body, context);
+        const request = this.prepareAnthropicRequest(body, context, ultracode);
         Logger.info(
           `Anthropic request: requested=${body.model}, model=${context.model.id}, account=${context.email}, stream=${body.stream === true}, ` +
-            describeThinking(request, body.output_config?.effort),
+            `${describeThinking(request, body.output_config?.effort)}, ${describeUltracode(ultracode)}`,
         );
 
         if (body.stream) {
@@ -275,8 +283,13 @@ export class GatewayServer {
   /**
    * Build the Gemini request for one account. The client's own thinking budget
    * is honoured where the model allows it, then clamped to the model's limits.
+   * Ultracode, when on, is restated last, after the effort note.
    */
-  private prepareAnthropicRequest(body: AnthropicRequest, context: LeaseContext): GeminiRequest {
+  private prepareAnthropicRequest(
+    body: AnthropicRequest,
+    context: LeaseContext,
+    ultracode: UltracodeState | undefined,
+  ): GeminiRequest {
     const { request, requestedThinkingBudget, requestedEffort } = toGeminiRequest(
       body,
       context.model.id,
@@ -301,6 +314,7 @@ export class GatewayServer {
       thinkingBudget: context.model.thinkingBudget,
     });
     noteEffort(request, requestedEffort);
+    noteUltracode(request, body, ultracode);
     return request;
   }
 

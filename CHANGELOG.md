@@ -10,13 +10,31 @@
 - **Claude Code and Codex follow their window's account.** Each window sets
   its name in the environment of the agents it launches, and they send it
   with every request. Whichever window's gateway answers, the request runs on
-  the account that window chose. Codex needs **Use model** once more to add
-  the header; the extension updates an existing Codex config on its own.
+  the account that window chose. An existing Codex config gets the header
+  added on its own.
 - **One gateway address for every window.** A window that cannot bind the
   preferred port no longer hands agents its fallback port. It gives them the
   preferred address while another window's gateway answers there, and takes
   the port over when that window closes. A config left pointing at a port
   that no longer answers is re-pointed.
+- **Usage by time range.** The Usage tab filters by This hour, Today,
+  Yesterday, 7 days, 30 days or All, and every figure follows the range.
+  Today and Yesterday show each other for comparison, and the longer ranges
+  add a day-by-day bar row. The choice is remembered.
+- **Clear history asks how much.** It offers This hour, Today, Yesterday,
+  the last 7 or 30 days, everything older than 7 or 30 days, or Everything.
+  Each choice says what it would remove, and it removes usage and quota
+  readings alike. Everything asks for confirmation first.
+- **Usage history no longer runs out.** Usage used to be kept as the last
+  2000 requests, which a busy Claude Code day could overflow. It is now kept
+  as hourly totals for 400 days. Existing history is carried over on update.
+- **Ultracode works on the models served here.** Claude Code announces
+  ultracode only in reminders inside the conversation, which Gemini and
+  GPT-OSS weighed too lightly to start workflows on their own. When ultracode
+  is on, the gateway now restates it at the end of the system instruction, so
+  the model runs workflows on substantive tasks without being told. Workflow
+  subagents and Claude Code's own side requests, such as compaction, are left
+  alone. The request log shows the state.
 - **No blur over the panel when a tooltip opens.** Hovering **Use model**
   made Chromium redraw the blurred cards in stale strips. The cards no longer
   blur what is behind them; nothing scrolled under them anyway.

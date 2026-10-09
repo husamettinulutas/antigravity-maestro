@@ -92,10 +92,13 @@ windows. The rest of the pool is listed in rotation order, each account with its
 pill per family, and **Use** to serve from it. Drag the list to set the order rotation falls back
 down. Refreshing, reordering and removing an account are in its ⋯ menu.
 
-The **Usage** tab tracks what the pool actually spent. It starts with the total tokens served and
-the input / thinking / output mix. Then it breaks the spend down per model, each with its own
-input, thinking and output figures and the accounts that served it, and per account. Last, a quota
-history per account shows how fast each family is draining.
+The **Usage** tab tracks what the pool actually spent, over the range you pick: this hour, today,
+yesterday, 7 days, 30 days or all of it. It starts with the total tokens served and the input /
+thinking / output mix; today and yesterday show each other for comparison, and the longer ranges add
+a bar per day. Then it breaks the spend down per model, each with its own input, thinking and output
+figures and the accounts that served it, and per account. Last, a quota history per account shows how
+fast each family is draining. **Clear history…** asks how much to remove: a recent span, everything
+older than a week or a month, or everything.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/husamettinulutas/antigravity-maestro/HEAD/media/usage.png" width="440" alt="The Usage tab: total tokens served with the input, thinking and output mix, then each model's tokens split into input, thinking and output with the accounts that served it, the share per account, and a quota history per account with its drain rate" />
@@ -121,7 +124,8 @@ Copilot's model picker offers a **Thinking Effort** control for them where VS Co
 Low, Medium or High, about 1K or 4K tokens of thinking or the model's full budget — and
 `antigravityMaestro.copilot.thinkingEffort` sets the default. Claude Code's `--effort` and Codex's
 `model_reasoning_effort` set the same budgets, on every model that thinks, and the model is told the
-effort it runs at.
+effort it runs at. Claude Code's ultracode reaches the model the same way: while it is on, the model
+is told to run substantive tasks as workflows, without being asked each time.
 
 Each model in Copilot's picker shows the size of its context window, because the windows differ by
 an order of magnitude — around 1M tokens for the Gemini models against 200K for the Claude ones.

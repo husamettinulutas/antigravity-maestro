@@ -134,6 +134,18 @@
       </section>
 
       <section id="usage-tab" class="hidden" role="tabpanel" aria-labelledby="tab-usage">
+        <!--
+          Which span every figure below covers. Usage is kept per clock hour, so
+          the shortest span is the current hour, not a rolling 60 minutes.
+        -->
+        <div id="usage-ranges" class="ranges hidden" role="radiogroup" aria-label="Time range">
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="hour" title="Since the start of the current hour">This hour</button>
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="today" title="Since midnight">Today</button>
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="yesterday" title="Yesterday, midnight to midnight">Yesterday</button>
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="week" aria-label="Last 7 days" title="Today and the 6 days before">7 days</button>
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="month" aria-label="Last 30 days" title="Today and the 29 days before">30 days</button>
+          <button class="range" type="button" role="radio" aria-checked="false" data-range="all" aria-label="All time" title="Everything recorded">All</button>
+        </div>
         <div id="usage-body"></div>
         <div id="usage-empty" class="empty glass hidden">
           <div class="empty-title">No traffic yet</div>
@@ -144,10 +156,16 @@
         <section id="trends-section" class="section hidden">
           <div class="section-head">
             <span class="eyebrow">Quota history</span>
-            <button id="clear-history" class="text-btn" data-key="clear-history" title="Forget every recorded quota reading">Clear history</button>
           </div>
           <div id="trends" class="list glass-quiet trows"></div>
         </section>
+        <!--
+          Its own row, not the Quota history header: that section hides when no
+          account has two readings, while usage can still be listed above.
+        -->
+        <div id="usage-actions" class="usage-actions hidden">
+          <button id="clear-history" class="text-btn" data-key="clear-history" title="Choose how much usage and quota history to forget">Clear history…</button>
+        </div>
       </section>
     </main>
 
