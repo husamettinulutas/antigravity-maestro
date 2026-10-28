@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.4
+
+- **Gemini models no longer answer with `[tool call] name({...})` text
+  instead of calling the tool.** Gemini 3 refuses a replayed tool call that
+  has lost its thought signature. That happens after an extension reload,
+  after switching models, or after an hour of idling. Such calls were
+  therefore rewritten as `[tool call] …` / `[tool result] …` text in the
+  history. After a reload every earlier step of the chat read that way, so
+  the model copied the pattern: it wrote its next calls as text, the agent
+  saw no call to run, and the turn stopped. These calls now go up as real
+  tool calls under the signature Google documents for calls Gemini did not
+  issue itself (`skip_thought_signature_validator`). This applies to Copilot
+  Chat, Claude Code and Codex alike. Thanks to @felipecrs (#13).
+- **The image models' images now reach the client.** The gateway passed on
+  the text and tool calls of an answer and dropped the generated image, so
+  `gemini-3.1-flash-image` came back empty (`content: null`, or `.` over the
+  Anthropic API). It also took the turn for an empty one and asked again,
+  paying for the image twice. The image now arrives as markdown with a data
+  URI (`![image](data:image/png;base64,…)`) over Chat Completions, Responses
+  and the Anthropic API. When the client sends it back with the history, it
+  goes to the model as an image again rather than as a megabyte of base64
+  text. `POST /v1/images/generations` is served too, answering with
+  `b64_json`.
+
 ## 1.3.3
 
 - **Claude Code no longer spends Opus quota when another model was picked.**
