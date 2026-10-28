@@ -1,4 +1,5 @@
 import { GeminiPart, GeminiResponse, UsageMetadata } from '../gemini';
+import { imageMarkdown, isAnswerImage } from '../images';
 import { signatureStore } from '../signatureStore';
 import { prefixedId } from '../../utils/ids';
 import { formatSse } from '../../utils/sse';
@@ -94,6 +95,12 @@ export class AnthropicStreamMapper {
   private pushPart(part: GeminiPart): string {
     if (part.functionCall?.name) {
       return this.emitToolCall(part);
+    }
+
+    if (isAnswerImage(part)) {
+      let out = this.openBlockOfType('text', { type: 'text', text: '' });
+      out += this.emitDelta({ type: 'text_delta', text: imageMarkdown(part, this.model) });
+      return out;
     }
 
     if (typeof part.text !== 'string' || part.text === '') {

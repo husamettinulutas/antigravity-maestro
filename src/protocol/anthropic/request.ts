@@ -5,6 +5,7 @@ import {
   SAFETY_SETTINGS,
   pruneUndefined,
 } from '../gemini';
+import { replayImages } from '../images';
 import { sanitizeToolSchema } from '../schema';
 import { signatureFamilyOf, signatureStore } from '../signatureStore';
 import {
@@ -120,7 +121,8 @@ function convertAssistantContent(
       case 'text': {
         const text = String((block as any).text ?? '');
         if (text !== '') {
-          parts.push({ text });
+          // An image this gateway generated comes back as markdown; see `replayImages`.
+          parts.push(...replayImages({ text }, model));
         }
         break;
       }

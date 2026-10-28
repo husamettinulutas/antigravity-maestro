@@ -1,4 +1,5 @@
 import { GeminiContent, GeminiRequest, GeminiResponse, UsageMetadata } from '../protocol/gemini';
+import { isAnswerImage } from '../protocol/images';
 
 /** Rough characters-per-token ratio, the same one the token count estimate uses. */
 const CHARS_PER_TOKEN = 3.7;
@@ -101,7 +102,9 @@ export class EmptyResponseWatch {
     this.promptTokens = Math.max(this.promptTokens, chunk.usageMetadata?.promptTokenCount ?? 0);
 
     for (const part of candidate?.content?.parts ?? []) {
-      if (part.functionCall?.name) {
+      // A generated image is an answer: missing it took an image model's turn
+      // for silence and paid for the image a second time on the nudge.
+      if (part.functionCall?.name || isAnswerImage(part)) {
         this.answered = true;
       } else if (typeof part.text === 'string' && part.text !== '') {
         if (part.thought) {
@@ -113,7 +116,7 @@ export class EmptyResponseWatch {
     }
   }
 
-  /** True once the stream has carried text or a tool call. */
+  /** True once the stream has carried text, a tool call or an image. */
   get sawAnswer(): boolean {
     return this.answered;
   }

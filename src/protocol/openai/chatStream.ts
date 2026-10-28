@@ -1,4 +1,5 @@
 import { GeminiPart, GeminiResponse, UsageMetadata } from '../gemini';
+import { imageMarkdown, isAnswerImage } from '../images';
 import { signatureStore } from '../signatureStore';
 import { prefixedId } from '../../utils/ids';
 import { ChatToolCall, toFinishReason } from './types';
@@ -82,6 +83,10 @@ export class ChatStreamMapper {
       });
     }
 
+    if (isAnswerImage(part)) {
+      return this.chunk({ delta: { ...this.rolePrefix(), content: imageMarkdown(part, this.model) } });
+    }
+
     if (typeof part.text !== 'string' || part.text === '') {
       return '';
     }
@@ -139,6 +144,10 @@ export function toChatCompletion(response: GeminiResponse, model: string) {
           arguments: JSON.stringify(part.functionCall.args ?? {}),
         },
       });
+      continue;
+    }
+    if (isAnswerImage(part)) {
+      content += imageMarkdown(part, model);
       continue;
     }
     if (typeof part.text !== 'string' || part.text === '') {

@@ -84,6 +84,15 @@ export interface ChatCompletionsRequest {
   reasoning_effort?: string;
 }
 
+export interface ImageGenerationRequest {
+  prompt: string;
+  /** An image model id; anything else (`dall-e-3`, `gpt-image-1`) gets the default one. */
+  model?: string;
+  n?: number;
+  /** `url` is answered with a data URI: the gateway has nowhere to host the image. */
+  response_format?: 'b64_json' | 'url';
+}
+
 /** Map a Gemini finishReason onto an OpenAI finish_reason. */
 export function toFinishReason(finishReason: string | undefined, usedTool: boolean): string {
   if (usedTool) {

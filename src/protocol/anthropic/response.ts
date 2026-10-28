@@ -1,4 +1,5 @@
 import { GeminiResponse } from '../gemini';
+import { imageMarkdown, isAnswerImage } from '../images';
 import { signatureStore } from '../signatureStore';
 import { prefixedId } from '../../utils/ids';
 import { AnthropicContentBlock, AnthropicResponse, toStopReason } from './types';
@@ -25,7 +26,8 @@ export function toAnthropicResponse(response: GeminiResponse, model: string): An
       continue;
     }
 
-    if (typeof part.text !== 'string' || part.text === '') {
+    const answerText = isAnswerImage(part) ? imageMarkdown(part, model) : part.text;
+    if (typeof answerText !== 'string' || answerText === '') {
       continue;
     }
 
@@ -46,9 +48,9 @@ export function toAnthropicResponse(response: GeminiResponse, model: string): An
 
     const last = content[content.length - 1];
     if (last?.type === 'text') {
-      (last as any).text += part.text;
+      (last as any).text += answerText;
     } else {
-      content.push({ type: 'text', text: part.text });
+      content.push({ type: 'text', text: answerText });
     }
   }
 

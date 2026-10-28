@@ -1,4 +1,5 @@
 import { GeminiPart, GeminiResponse, UsageMetadata } from '../gemini';
+import { imageMarkdown, isAnswerImage } from '../images';
 import { signatureStore } from '../signatureStore';
 import { prefixedId } from '../../utils/ids';
 import { formatSse } from '../../utils/sse';
@@ -79,6 +80,9 @@ export class ResponsesStreamMapper {
   private pushPart(part: GeminiPart): string {
     if (part.functionCall?.name) {
       return this.emitFunctionCall(part);
+    }
+    if (isAnswerImage(part)) {
+      return this.pushText(imageMarkdown(part, this.model));
     }
     if (typeof part.text !== 'string' || part.text === '') {
       return '';
@@ -284,6 +288,10 @@ export function toResponsesResponse(response: GeminiResponse, model: string) {
         arguments: JSON.stringify(part.functionCall.args ?? {}),
         call_id: callId,
       });
+      continue;
+    }
+    if (isAnswerImage(part)) {
+      text += imageMarkdown(part, model);
       continue;
     }
     if (typeof part.text !== 'string' || part.text === '') {

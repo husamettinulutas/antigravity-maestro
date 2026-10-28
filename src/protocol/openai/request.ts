@@ -5,6 +5,7 @@ import {
   SAFETY_SETTINGS,
   pruneUndefined,
 } from '../gemini';
+import { replayImages } from '../images';
 import { sanitizeToolSchema } from '../schema';
 import { signatureFamilyOf, signatureStore } from '../signatureStore';
 import {
@@ -257,7 +258,9 @@ function convertItem(
   }
 
   const role: GeminiContent['role'] = item.role === 'assistant' ? 'model' : 'user';
-  return { role, parts: contentParts(item.content) };
+  const parts = contentParts(item.content);
+  // An image this gateway generated comes back as markdown; see `replayImages`.
+  return { role, parts: role === 'model' ? parts.flatMap((part) => replayImages(part, model)) : parts };
 }
 
 function contentParts(content: ResponsesInputItem['content']): GeminiPart[] {
@@ -359,7 +362,8 @@ function convertChatMessage(
   const parts: GeminiPart[] = [];
   const text = chatText(message.content);
   if (text !== '') {
-    parts.push({ text });
+    // An image this gateway generated comes back as markdown; see `replayImages`.
+    parts.push(...(message.role === 'assistant' ? replayImages({ text }, model) : [{ text }]));
   }
 
   if (Array.isArray(message.content)) {

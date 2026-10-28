@@ -4,11 +4,12 @@ import { AnthropicStreamMapper } from '../protocol/anthropic/stream';
 import { toGeminiRequest } from '../protocol/anthropic/request';
 import { toAnthropicResponse } from '../protocol/anthropic/response';
 import { AnthropicRequest } from '../protocol/anthropic/types';
-import { GeminiRequest, GeminiResponse, UsageMetadata } from '../protocol/gemini';
+import { GeminiRequest, GeminiResponse, SAFETY_SETTINGS, UsageMetadata, textOf } from '../protocol/gemini';
+import { isAnswerImage } from '../protocol/images';
 import { ChatStreamMapper, toChatCompletion } from '../protocol/openai/chatStream';
 import { chatToGemini, responsesToGemini } from '../protocol/openai/request';
 import { ResponsesStreamMapper, toResponsesResponse } from '../protocol/openai/responsesStream';
-import { ChatCompletionsRequest, ResponsesRequest } from '../protocol/openai/types';
+import { ChatCompletionsRequest, ImageGenerationRequest, ResponsesRequest } from '../protocol/openai/types';
 import { CloudCodeClient, StreamBrokenError, UpstreamError } from '../upstream/cloudCodeClient';
 import {
   applyGenerationConstraints,
@@ -38,6 +39,8 @@ import { Logger } from '../utils/logger';
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 /** What a client is told to wait when every account was refused upstream. */
 const FORBIDDEN_RETRY_AFTER_SECONDS = 60;
+/** Each image is a full, billed turn; `n` beyond this is clamped. */
+const MAX_IMAGES_PER_REQUEST = 4;
 /** Rough characters-per-token ratio for count_tokens. */
 const CHARS_PER_TOKEN = 3.7;
 /**
@@ -201,6 +204,9 @@ export class GatewayServer {
         return;
       case 'POST /v1/chat/completions':
         await this.handleChatCompletions(req, res);
+        return;
+      case 'POST /v1/images/generations':
+        await this.handleImageGenerations(req, res);
         return;
       default:
         sendJson(res, 404, errorBody('not_found_error', `No route for ${route}`));
@@ -450,6 +456,69 @@ export class GatewayServer {
         const response = await this.generateTurn(request, context, abort.signal);
         sendJson(res, 200, toChatCompletion(response, context.model.id));
       }, abort.signal, sessionOf(req, body), windowOf(req));
+    } catch (error) {
+      this.reportFailure(res, error);
+    }
+  }
+
+  /**
+   * OpenAI's image endpoint, for clients that generate images through it
+   * rather than in a chat. Served by the image models, one turn per image.
+   */
+  private async handleImageGenerations(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    const body = await readJsonBody<ImageGenerationRequest>(req);
+    if (typeof body?.prompt !== 'string' || body.prompt.trim() === '') {
+      sendJson(res, 400, errorBody('invalid_request_error', 'prompt is required'));
+      return;
+    }
+
+    // Clients name OpenAI's image models; those go to the first image model.
+    const imageModels = this.deps.catalog.listAll().filter((model) => model.family === 'image');
+    const model = (imageModels.find((candidate) => candidate.id === body.model) ?? imageModels[0])?.id;
+    if (!model) {
+      sendJson(res, 400, errorBody('invalid_request_error', 'No signed-in account offers an image model'));
+      return;
+    }
+
+    const count = Math.min(Math.max(Math.floor(body.n ?? 1), 1), MAX_IMAGES_PER_REQUEST);
+    const abort = abortOnClose(res);
+
+    try {
+      await this.deps.lease.run(model, async (context) => {
+        const request = this.tuneRequest(
+          {
+            contents: [{ role: 'user', parts: [{ text: body.prompt }] }],
+            safetySettings: [...SAFETY_SETTINGS],
+          },
+          context,
+        );
+        Logger.info(
+          `Image request: requested=${body.model ?? '(none)'}, model=${context.model.id}, account=${context.email}, n=${count}`,
+        );
+
+        const data: { b64_json?: string; url?: string }[] = [];
+        for (let i = 0; i < count; i++) {
+          const response = await this.generateTurn(request, context, abort.signal);
+          const parts = response.candidates?.[0]?.content?.parts ?? [];
+          const images = parts.filter(isAnswerImage);
+          if (images.length === 0) {
+            // The model answered in words — usually why it would not draw it.
+            const said = textOf(parts).trim();
+            throw new EmptyResponseError(`${context.model.id} returned no image${said ? `: ${said}` : '.'}`, false);
+          }
+          for (const { inlineData } of images) {
+            data.push(
+              body.response_format === 'url'
+                ? { url: `data:${inlineData.mimeType || 'image/png'};base64,${inlineData.data}` }
+                : { b64_json: inlineData.data },
+            );
+          }
+        }
+        sendJson(res, 200, { created: Math.floor(Date.now() / 1000), data });
+      }, abort.signal, undefined, windowOf(req));
     } catch (error) {
       this.reportFailure(res, error);
     }
