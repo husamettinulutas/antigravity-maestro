@@ -41,6 +41,18 @@ export function signatureFamilyOf(modelId: string): SignatureFamily {
   return 'gemini';
 }
 
+/**
+ * The signature Google documents for a function call Gemini 3 did not issue
+ * in this conversation — a trace from another model, or one whose signature
+ * was lost. It passes the check that refuses a bare call.
+ *
+ * Such calls used to be retold as `[tool call] name({...})` text in the
+ * model's own turns instead. After a reload every earlier step read that way,
+ * and the model took the pattern up: it wrote its next calls as that text
+ * rather than making them, and the agent stopped.
+ */
+export const SKIP_SIGNATURE = 'skip_thought_signature_validator';
+
 const TTL_MS = 60 * 60 * 1000;
 const MAX_ENTRIES = 500;
 

@@ -25,7 +25,7 @@ const {
 } = require('../provider/copilotProvider');
 const vscode = require('vscode');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { signatureStore } = require('../protocol/signatureStore');
+const { SKIP_SIGNATURE, signatureStore } = require('../protocol/signatureStore');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { CONTINUE_NUDGE, EmptyResponseError } = require('../upstream/emptyResponse');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -222,11 +222,12 @@ test('copilot: a Gemini tool call is replayed with the signature Gemini issued',
   assert.equal(contents[0].parts[0].thoughtSignature, 'signature-from-gemini');
 });
 
-test('copilot: a tool call with no signature is retold as text, not sent bare', () => {
+test('copilot: a tool call with no signature goes up under the skip signature, not as text', () => {
   // Exactly what an extension reload leaves behind: the call is in the
   // conversation, the signature that came with it is not. Sent as a bare
   // functionCall the upstream answers "Function call is missing a
-  // thought_signature" and the whole turn fails.
+  // thought_signature". Retold as `[tool call] …` text instead, it taught the
+  // model to write its next calls as that text rather than make them (#13).
   const { contents } = convertMessages(
     [
       message(LanguageModelChatMessageRole.Assistant, [
@@ -240,12 +241,15 @@ test('copilot: a tool call with no signature is retold as text, not sent bare', 
     true,
   );
 
-  assert.equal(contents[0].parts[0].functionCall, undefined);
-  assert.equal(contents[0].parts[0].text, '[tool call] manage_todo_list({"op":"write"})');
-  // The result has to follow the call: a functionResponse with no functionCall
-  // ahead of it is rejected just as hard.
-  assert.equal(contents[1].parts[0].functionResponse, undefined);
-  assert.equal(contents[1].parts[0].text, '[tool result] manage_todo_list: done');
+  assert.deepEqual(contents[0].parts[0], {
+    functionCall: { name: 'manage_todo_list', args: { op: 'write' } },
+    thoughtSignature: SKIP_SIGNATURE,
+  });
+  assert.deepEqual(contents[1].parts[0].functionResponse, {
+    name: 'manage_todo_list',
+    response: { output: 'done' },
+  });
+  assert.ok(!JSON.stringify(contents).includes('[tool call]'));
 });
 
 test('copilot: a signature from another family is not replayed', () => {
@@ -264,8 +268,8 @@ test('copilot: a signature from another family is not replayed', () => {
     true,
   );
 
-  assert.equal(contents[0].parts[0].functionCall, undefined);
-  assert.equal(contents[0].parts[0].text, '[tool call] listDir({"path":"."})');
+  assert.equal(contents[0].parts[0].functionCall.name, 'listDir');
+  assert.equal(contents[0].parts[0].thoughtSignature, SKIP_SIGNATURE);
 
   // …and the same call going the other way keeps its own signature.
   const back = convertMessages(
@@ -335,9 +339,8 @@ test('copilot: the calls after the first in a parallel batch keep their tool sha
   );
 });
 
-test('copilot: a step whose first call lost its signature is retold whole', () => {
-  // Sending the rest as calls would make the second one the step's first —
-  // unsigned, and refused.
+test('copilot: a step whose first call lost its signature is signed at its first call only', () => {
+  // Gemini checks only the step's first call, as it signs only that one.
   const { contents } = convertMessages(
     [
       message(LanguageModelChatMessageRole.Assistant, [
@@ -353,8 +356,14 @@ test('copilot: a step whose first call lost its signature is retold whole', () =
     true,
   );
 
-  assert.ok(contents[0].parts.every((part: any) => part.functionCall === undefined));
-  assert.ok(contents[1].parts.every((part: any) => part.functionResponse === undefined));
+  assert.deepEqual(
+    contents[0].parts.map((part: any) => [part.functionCall.name, part.thoughtSignature]),
+    [
+      ['read_file', SKIP_SIGNATURE],
+      ['read_file', undefined],
+    ],
+  );
+  assert.ok(contents[1].parts.every((part: any) => part.functionResponse.name === 'read_file'));
 });
 
 test('copilot: earlier reasoning and blank text are not replayed as things the model said', () => {

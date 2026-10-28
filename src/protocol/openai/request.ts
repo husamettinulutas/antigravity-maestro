@@ -7,7 +7,7 @@ import {
 } from '../gemini';
 import { replayImages } from '../images';
 import { sanitizeToolSchema } from '../schema';
-import { signatureFamilyOf, signatureStore } from '../signatureStore';
+import { SKIP_SIGNATURE, signatureFamilyOf, signatureStore } from '../signatureStore';
 import {
   ChatCompletionsRequest,
   ChatMessage,
@@ -31,11 +31,11 @@ export function responsesToGemini(
 ): GeminiRequest {
   const items = normalizeInput(body.input);
   const toolNames = collectToolNames(items);
-  const unsigned = unsignedCallIds(responseSteps(items), model, requiresSignature);
+  const unsignedLeads = unsignedStepLeads(responseSteps(items), model, requiresSignature);
   const contents: GeminiContent[] = [];
 
   for (const item of items) {
-    const { role, parts } = convertItem(item, toolNames, model, unsigned);
+    const { role, parts } = convertItem(item, toolNames, model, unsignedLeads);
     if (parts.length === 0) {
       continue;
     }
@@ -87,7 +87,7 @@ export function chatToGemini(
       steps.push(message.tool_calls.map((call) => call.id));
     }
   }
-  const unsigned = unsignedCallIds(steps, model, requiresSignature);
+  const unsignedLeads = unsignedStepLeads(steps, model, requiresSignature);
 
   const contents: GeminiContent[] = [];
   const systemChunks: string[] = [];
@@ -98,7 +98,7 @@ export function chatToGemini(
       continue;
     }
 
-    const parts = convertChatMessage(message, toolNames, model, unsigned);
+    const parts = convertChatMessage(message, toolNames, model, unsignedLeads);
     if (parts.length === 0) {
       continue;
     }
@@ -145,42 +145,41 @@ export function chatToGemini(
 }
 
 /**
- * The tool calls that cannot be replayed to `model` as tool calls.
+ * The first call of every step `model` holds no signature for; each goes up
+ * under `SKIP_SIGNATURE`.
  *
  * Gemini 3 rejects the whole request — HTTP 400, "Function call is missing a
  * thought_signature" — when a replayed `functionCall` carries no signature it
  * issued. The store holds the ones this gateway has seen, but nothing survives
  * a switch to another model family, a gateway restart, or an hour of idling.
  *
- * Dropping those calls would orphan their results; sending them bare fails the
- * turn. So they are retold as text, which keeps the history readable and the
- * request valid. The set is computed up front because a call and its result
- * are converted separately and the two decisions have to agree.
- *
- * `steps` holds the calls made together, in order, and the first call decides
- * for its step: Gemini signs only the first call of a parallel batch and checks
- * only that one. Judging each call on its own retold every parallel call after
- * the first as text.
+ * `steps` holds the calls made together, in order. Gemini signs only the first
+ * call of a parallel batch and checks only that one.
  *
  * Only Gemini needs this: the Claude and GPT models are served by translating
  * the request back out of the Gemini shape, and an unsigned call survives it.
  */
-function unsignedCallIds(
+function unsignedStepLeads(
   steps: readonly (readonly string[])[],
   model: string,
   requiresSignature: boolean,
 ): ReadonlySet<string> {
-  const unsigned = new Set<string>();
+  const leads = new Set<string>();
   if (!requiresSignature || signatureFamilyOf(model) !== 'gemini') {
-    return unsigned;
+    return leads;
   }
 
   for (const step of steps) {
     if (step.length > 0 && !signatureStore.forToolCall(step[0], model)) {
-      step.forEach((callId) => unsigned.add(callId));
+      leads.add(step[0]);
     }
   }
-  return unsigned;
+  return leads;
+}
+
+/** The signature a replayed call goes up with; see `unsignedStepLeads`. */
+function signatureFor(callId: string, model: string, unsignedLeads: ReadonlySet<string>): string | undefined {
+  return unsignedLeads.has(callId) ? SKIP_SIGNATURE : signatureStore.forToolCall(callId, model);
 }
 
 /**
@@ -213,25 +212,18 @@ function convertItem(
   item: ResponsesInputItem,
   toolNames: Map<string, string>,
   model: string,
-  unsigned: ReadonlySet<string>,
+  unsignedLeads: ReadonlySet<string>,
 ): { role: GeminiContent['role']; parts: GeminiPart[] } {
   switch (item.type) {
     case 'function_call': {
       const name = item.name ?? 'tool';
       const args = parseArguments(item.arguments);
-      // No signature this model would accept: retold as text rather than sent
-      // bare, which the upstream rejects. See `unsignedCallIds`.
-      if (item.call_id && unsigned.has(item.call_id)) {
-        return { role: 'model', parts: [{ text: `[tool call] ${name}(${JSON.stringify(args)})` }] };
-      }
       return {
         role: 'model',
         parts: [
           {
             functionCall: { id: item.call_id, name, args },
-            thoughtSignature: item.call_id
-              ? signatureStore.forToolCall(item.call_id, model)
-              : undefined,
+            thoughtSignature: item.call_id ? signatureFor(item.call_id, model, unsignedLeads) : undefined,
           },
         ],
       };
@@ -239,11 +231,6 @@ function convertItem(
     case 'function_call_output': {
       const name = (item.call_id && toolNames.get(item.call_id)) || 'tool';
       const output = outputText(item.output);
-      // The call it answers was retold as text, and a functionResponse with no
-      // functionCall before it is rejected just as hard as the bare call.
-      if (item.call_id && unsigned.has(item.call_id)) {
-        return { role: 'user', parts: [{ text: `[tool result] ${name}: ${output}` }] };
-      }
       return {
         role: 'user',
         parts: [{ functionResponse: { id: item.call_id, name, response: { output } } }],
@@ -346,16 +333,11 @@ function convertChatMessage(
   message: ChatMessage,
   toolNames: Map<string, string>,
   model: string,
-  unsigned: ReadonlySet<string>,
+  unsignedLeads: ReadonlySet<string>,
 ): GeminiPart[] {
   if (message.role === 'tool') {
     const name = (message.tool_call_id && toolNames.get(message.tool_call_id)) || message.name || 'tool';
     const output = chatText(message.content);
-    // The call it answers was retold as text, and a functionResponse with no
-    // functionCall before it is rejected just as hard as the bare call.
-    if (message.tool_call_id && unsigned.has(message.tool_call_id)) {
-      return [{ text: `[tool result] ${name}: ${output}` }];
-    }
     return [{ functionResponse: { id: message.tool_call_id, name, response: { output } } }];
   }
 
@@ -378,14 +360,9 @@ function convertChatMessage(
   }
 
   for (const call of message.tool_calls ?? []) {
-    const args = parseArguments(call.function.arguments);
-    if (unsigned.has(call.id)) {
-      parts.push({ text: `[tool call] ${call.function.name}(${JSON.stringify(args)})` });
-      continue;
-    }
     parts.push({
-      functionCall: { id: call.id, name: call.function.name, args },
-      thoughtSignature: signatureStore.forToolCall(call.id, model),
+      functionCall: { id: call.id, name: call.function.name, args: parseArguments(call.function.arguments) },
+      thoughtSignature: signatureFor(call.id, model, unsignedLeads),
     });
   }
 

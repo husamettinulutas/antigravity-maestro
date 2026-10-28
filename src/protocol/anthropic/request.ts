@@ -7,7 +7,7 @@ import {
 } from '../gemini';
 import { replayImages } from '../images';
 import { sanitizeToolSchema } from '../schema';
-import { signatureFamilyOf, signatureStore } from '../signatureStore';
+import { SKIP_SIGNATURE, signatureFamilyOf, signatureStore } from '../signatureStore';
 import {
   AnthropicContentBlock,
   AnthropicEffort,
@@ -36,7 +36,7 @@ export interface AnthropicConversion {
  *
  * `model` is the upstream model the request is bound for. It decides which
  * stored signatures may be replayed — one family's signature is not valid for
- * another — and which calls have to be retold as text because none survives.
+ * another — and which calls go under the skip signature because none survives.
  */
 export function toGeminiRequest(
   anthropic: AnthropicRequest,
@@ -44,14 +44,14 @@ export function toGeminiRequest(
   requiresSignature = false,
 ): AnthropicConversion {
   const toolNames = collectToolNames(anthropic.messages);
-  const unsigned = unsignedToolUseIds(anthropic.messages, model, requiresSignature);
+  const unsignedLeads = unsignedStepLeads(anthropic.messages, model, requiresSignature);
   const contents: GeminiContent[] = [];
 
   for (const message of anthropic.messages) {
     const parts =
       message.role === 'assistant'
-        ? convertAssistantContent(message, model, unsigned)
-        : convertUserContent(message, toolNames, unsigned);
+        ? convertAssistantContent(message, model, unsignedLeads)
+        : convertUserContent(message, toolNames);
 
     if (parts.length === 0) {
       continue;
@@ -109,7 +109,7 @@ export function toGeminiRequest(
 function convertAssistantContent(
   message: AnthropicMessage,
   model: string,
-  unsigned: ReadonlySet<string>,
+  unsignedLeads: ReadonlySet<string>,
 ): GeminiPart[] {
   const blocks = asBlocks(message.content);
   const parts: GeminiPart[] = [];
@@ -147,19 +147,14 @@ function convertAssistantContent(
         break;
       case 'tool_use': {
         const toolUse = block as AnthropicToolUseBlock;
-        if (unsigned.has(toolUse.id)) {
-          // No signature this model would accept. Retold rather than replayed:
-          // see `unsignedToolUseIds`.
-          const args = JSON.stringify(toolUse.input ?? {});
-          parts.push({ text: `[tool call] ${toolUse.name}(${args})` });
-          break;
-        }
         parts.push({
           // The id is required: for the Claude models the upstream turns this
           // back into an Anthropic `tool_use` block and rejects the whole
           // request when it has none.
           functionCall: { id: toolUse.id, name: toolUse.name, args: toolUse.input ?? {} },
-          thoughtSignature: signatureStore.forToolCall(toolUse.id, model) ?? pendingSignature,
+          thoughtSignature: unsignedLeads.has(toolUse.id)
+            ? SKIP_SIGNATURE
+            : (signatureStore.forToolCall(toolUse.id, model) ?? pendingSignature),
         });
         break;
       }
@@ -174,7 +169,6 @@ function convertAssistantContent(
 function convertUserContent(
   message: AnthropicMessage,
   toolNames: Map<string, string>,
-  unsigned: ReadonlySet<string>,
 ): GeminiPart[] {
   const parts: GeminiPart[] = [];
 
@@ -200,12 +194,6 @@ function convertUserContent(
         const result = block as AnthropicToolResultBlock;
         const name = toolNames.get(result.tool_use_id) ?? 'tool';
         const output = flattenToolResult(result.content);
-        // The call it answers was retold as text, and a functionResponse with
-        // no functionCall before it is rejected just as hard as the bare call.
-        if (unsigned.has(result.tool_use_id)) {
-          parts.push({ text: `[tool result] ${name}: ${output}` });
-          break;
-        }
         parts.push({
           functionResponse: {
             id: result.tool_use_id,
@@ -224,7 +212,8 @@ function convertUserContent(
 }
 
 /**
- * The tool calls that cannot be replayed to `model` as tool calls.
+ * The first call of every step `model` holds no signature for; each goes up
+ * under `SKIP_SIGNATURE`.
  *
  * Gemini 3 rejects the whole request — HTTP 400, "Function call is missing a
  * thought_signature" — when a replayed `functionCall` carries no signature it
@@ -232,22 +221,17 @@ function convertUserContent(
  * preceded the call, and the store keeps the rest, but neither survives a
  * switch to another model family, a gateway restart, or an hour of idling.
  *
- * Dropping those calls would orphan their results; sending them bare fails the
- * turn. So they are retold as text, which keeps the history readable and the
- * request valid. The set is computed up front because a call and its result
- * are converted in separate passes and the two decisions have to agree.
- *
  * Only Gemini needs this: the Claude and GPT models are served by translating
  * the request back out of the Gemini shape, and an unsigned call survives it.
  */
-function unsignedToolUseIds(
+function unsignedStepLeads(
   messages: AnthropicMessage[],
   model: string,
   requiresSignature: boolean,
 ): ReadonlySet<string> {
-  const unsigned = new Set<string>();
+  const leads = new Set<string>();
   if (!requiresSignature || signatureFamilyOf(model) !== 'gemini') {
-    return unsigned;
+    return leads;
   }
 
   for (const message of messages) {
@@ -257,13 +241,9 @@ function unsignedToolUseIds(
     // Mirrors the walk in `convertAssistantContent`: a tool call falls back to
     // the signature of the thinking block ahead of it in the same turn.
     //
-    // The first call decides for the whole turn. Gemini signs only the first
-    // call of a step — the rest of a parallel batch never carry one — and
-    // checks only that first call, so judging each call on its own retold
-    // every parallel call after the first as text.
+    // Gemini signs only the first call of a step — the rest of a parallel
+    // batch never carry one — and checks only that first call.
     let pendingSignature: string | undefined;
-    let signed = false;
-    const ids: string[] = [];
     for (const block of asBlocks(message.content)) {
       if (block.type === 'thinking') {
         const signature = (block as any).signature as string | undefined;
@@ -274,16 +254,13 @@ function unsignedToolUseIds(
         continue;
       }
       const toolUse = block as AnthropicToolUseBlock;
-      if (ids.length === 0) {
-        signed = !!signatureStore.forToolCall(toolUse.id, model) || !!pendingSignature;
+      if (!signatureStore.forToolCall(toolUse.id, model) && !pendingSignature) {
+        leads.add(toolUse.id);
       }
-      ids.push(toolUse.id);
-    }
-    if (!signed) {
-      ids.forEach((id) => unsigned.add(id));
+      break;
     }
   }
-  return unsigned;
+  return leads;
 }
 
 /** tool_use_id → tool name, so tool results can be named for Gemini. */

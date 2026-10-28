@@ -12,7 +12,7 @@ import {
   pruneUndefined,
 } from '../protocol/gemini';
 import { sanitizeToolSchema } from '../protocol/schema';
-import { signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
+import { SKIP_SIGNATURE, signatureFamilyOf, signatureStore } from '../protocol/signatureStore';
 import { CloudCodeClient, StreamBrokenError } from '../upstream/cloudCodeClient';
 import { applyGenerationConstraints, budgetForEffort, noteEffort } from '../upstream/constraints';
 import {
@@ -602,8 +602,8 @@ export function followsTaskComplete(
  * which VS Code only supplies on the original call.
  *
  * `model` is the model the contents are being built for: it decides which
- * stored thought signatures may be replayed, and which calls have to be
- * retold as text because no signature for them survives.
+ * stored thought signatures may be replayed, and which steps have to go under
+ * the skip signature because no signature for them survives.
  */
 export function convertMessages(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -614,14 +614,14 @@ export function convertMessages(
   contents: GeminiContent[];
 } {
   const toolNamesByCallId = collectToolNames(messages);
-  const unsigned = unsignedCallIds(messages, model, requiresSignature);
+  const unsignedLeads = unsignedStepLeads(messages, model, requiresSignature);
   const contents: GeminiContent[] = [];
   const systemChunks: string[] = [];
 
-  if (unsigned.size > 0) {
+  if (unsignedLeads.size > 0) {
     Logger.debug(
-      `Retelling ${unsigned.size} unsigned tool call(s) as text for ${model}`,
-      [...unsigned],
+      `Replaying ${unsignedLeads.size} unsigned tool step(s) to ${model} under the skip signature`,
+      [...unsignedLeads],
     );
   }
 
@@ -634,7 +634,7 @@ export function convertMessages(
 
     const parts: GeminiPart[] = [];
     for (const part of asArray(message.content)) {
-      const converted = convertPart(part, toolNamesByCallId, model, unsigned);
+      const converted = convertPart(part, toolNamesByCallId, model, unsignedLeads);
       if (converted) {
         parts.push(converted);
       }
@@ -677,7 +677,7 @@ function convertPart(
   part: unknown,
   toolNames: Map<string, string>,
   model: string,
-  unsigned: ReadonlySet<string>,
+  unsignedLeads: ReadonlySet<string>,
 ): GeminiPart | undefined {
   // Copilot hands the model's earlier reasoning back as thinking parts. They
   // carry no signature, so they cannot go back as thoughts, and sent as text
@@ -699,9 +699,6 @@ function convertPart(
 
   if (isToolCallPart(part)) {
     const args = typeof part.input === 'object' && part.input ? (part.input as any) : {};
-    if (unsigned.has(part.callId)) {
-      return { text: `[tool call] ${part.name}(${JSON.stringify(args)})` };
-    }
     return {
       functionCall: {
         // Withheld from the Gemini models alone, where an id Gemini never
@@ -710,18 +707,15 @@ function convertPart(
         name: part.name,
         args,
       },
-      thoughtSignature: signatureStore.forToolCall(part.callId, model),
+      thoughtSignature: unsignedLeads.has(part.callId)
+        ? SKIP_SIGNATURE
+        : signatureStore.forToolCall(part.callId, model),
     };
   }
 
   if (isToolResultPart(part)) {
     const name = toolNames.get(part.callId) ?? 'tool';
     const output = extractText(part.content) || '(no output)';
-    // The call it answers was retold as text, and a functionResponse with no
-    // functionCall before it is rejected just as hard as the bare call was.
-    if (unsigned.has(part.callId)) {
-      return { text: `[tool result] ${name}: ${output}` };
-    }
     return {
       functionResponse: {
         // The id goes with the call or not at all, on the rule above. Gemini
@@ -749,7 +743,8 @@ function convertPart(
 }
 
 /**
- * The tool calls that cannot be replayed to `model` as tool calls.
+ * The first call of every step `model` holds no signature for; each goes up
+ * under `SKIP_SIGNATURE`.
  *
  * Gemini 3 rejects the whole request — HTTP 400, "Function call is missing a
  * thought_signature" — when a replayed `functionCall` carries no signature it
@@ -757,46 +752,36 @@ function convertPart(
  * made by a different model family before the user switched, the extension was
  * reloaded and the in-memory store went with it, or the signature aged out.
  *
- * Dropping those calls would orphan their results and lose what the assistant
- * did; sending them bare fails the turn. So they are retold as text, which
- * keeps the history readable and the request valid. The set is computed in one
- * pass up front because a call and its result are converted separately and the
- * two decisions have to agree.
- *
  * The decision is made per step — one assistant turn — not per call. Gemini
  * signs only the first call of a step; the others in a parallel batch never
- * carry a signature, and only the first is checked. Judging each call on its
- * own retold every parallel call after the first as text, in every turn, even
- * with its signature safely in the store.
+ * carry a signature, and only the first is checked.
  *
  * Only Gemini needs this. The Claude and GPT models are served by translating
  * the request back out of the Gemini shape, and an unsigned tool call survives
  * that translation.
  */
-function unsignedCallIds(
+function unsignedStepLeads(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   model: string,
   requiresSignature: boolean,
 ): ReadonlySet<string> {
-  const unsigned = new Set<string>();
+  const leads = new Set<string>();
   if (!requiresSignature || signatureFamilyOf(model) !== 'gemini') {
-    return unsigned;
+    return leads;
   }
 
   for (const message of messages) {
     // task_complete calls are dropped from the history (see `convertPart`), so
     // the step's first call is the first of the ones that remain.
-    const calls = asArray(message.content).filter(
+    const first = asArray(message.content).find(
       (part): part is vscode.LanguageModelToolCallPart =>
         isToolCallPart(part) && part.name !== TASK_COMPLETE_TOOL,
     );
-    if (calls.length > 0 && !signatureStore.forToolCall(calls[0].callId, model)) {
-      for (const call of calls) {
-        unsigned.add(call.callId);
-      }
+    if (first && !signatureStore.forToolCall(first.callId, model)) {
+      leads.add(first.callId);
     }
   }
-  return unsigned;
+  return leads;
 }
 
 /** callId → tool name, taken from the assistant turns that made the calls. */
