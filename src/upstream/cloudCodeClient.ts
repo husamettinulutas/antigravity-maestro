@@ -5,6 +5,7 @@ import { officialRequestId, sessionIdFor } from '../utils/ids';
 import { Logger } from '../utils/logger';
 import { parseSse } from '../utils/sse';
 import { modelSpecificHeaders } from './constraints';
+import { declaredToolNames, recoverLeakedCalls, recoverLeakedCallsIn } from './leakedCalls';
 import { couldBeNotice, plainTextOf, retirementNotice } from './retirement';
 import { bodyUserAgent, clientIdentity, currentUserAgent, currentVersion } from './userAgent';
 
@@ -371,7 +372,7 @@ export class CloudCodeClient {
     // The internal endpoint wraps its result; the public shape is bare.
     const result = (payload?.response ?? payload ?? {}) as GeminiResponse;
     throwIfRetired(params.model, plainTextOf(result));
-    return result;
+    return recoverLeakedCallsIn(declaredToolNames(params.request), result);
   }
 
   /**
@@ -436,7 +437,10 @@ export class CloudCodeClient {
       }
     }
 
-    return screenForRetirement(params.model, iterate());
+    return recoverLeakedCalls(
+      declaredToolNames(params.request),
+      screenForRetirement(params.model, iterate()),
+    );
   }
 
   /** Pace the request against the account's allowance, then dispatch it. */
