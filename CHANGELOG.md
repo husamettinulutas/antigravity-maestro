@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.5
+
+- **A tool call Gemini writes out as text is made as a call.** Now and then a
+  Gemini model puts a tool call into its answer in its own syntax, for
+  example `call:default_api:rename_chat {…} </call:default_api:rename_chat>`,
+  instead of making it. The text landed in the chat, nothing ran, and the
+  turn ended. It could happen on the first turn of a chat as well, so it is
+  not the history problem fixed in 1.3.4. The extension now recognizes this
+  syntax as the answer streams in and hands it on as a real tool call when it
+  names a tool the client offered and its arguments can be read. Anything
+  else is shown as the model wrote it. This applies to Copilot Chat, Claude
+  Code and Codex alike. Thanks to @kazimsadiq (#14).
+
 ## 1.3.4
 
 - **Gemini models no longer answer with `[tool call] name({...})` text
