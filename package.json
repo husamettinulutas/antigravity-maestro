@@ -44,6 +44,11 @@
     "onStartupFinished",
     "onLanguageModelChatProvider:antigravity-maestro"
   ],
+  "capabilities": {
+    "agentsWindow": {
+      "supported": true
+    }
+  },
   "main": "./dist/extension.js",
   "type": "commonjs",
   "contributes": {
