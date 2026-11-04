@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.6
+
+- **The models show up in the new Agents window.** VS Code turns off
+  extensions with code in its Agents window unless they say they support it,
+  so the Antigravity models were missing from the model picker there. The
+  extension now declares `capabilities.agentsWindow.supported` in its
+  manifest (microsoft/vscode#342393). Thanks to @felipecrs (#15).
+
 ## 1.3.5
 
 - **A tool call Gemini writes out as text is made as a call.** Now and then a
