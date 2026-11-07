@@ -5,9 +5,20 @@ import { readBody, request } from '../utils/http';
 import { uuid } from '../utils/ids';
 import { Logger } from '../utils/logger';
 
-/** Used when the real Antigravity version cannot be discovered. */
-const FALLBACK_VERSION = '2.0.3';
-const VERSION_FEED_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app';
+/**
+ * Used when the real Antigravity version cannot be discovered, and the floor
+ * for whatever the feeds report: the endpoints turn away clients that claim an
+ * old version ("This version of Antigravity is no longer supported").
+ */
+const FALLBACK_VERSION = '2.29.0';
+/**
+ * Antigravity's update feeds. The first is the one the desktop app polls
+ * today; the second is the original feed, which stopped moving at 2.0.6.
+ */
+const VERSION_FEED_URLS = [
+  'https://antigravity-hub-auto-updater-974169037036.us-central1.run.app',
+  'https://antigravity-auto-updater-974169037036.us-central1.run.app',
+];
 const VERSION_REGEX = /\d+\.\d+\.\d+/g;
 
 let cachedUserAgent: string | undefined;
@@ -124,21 +135,22 @@ export function bodyUserAgent(email: string | undefined): string {
 }
 
 async function discoverVersion(): Promise<string> {
+  const reported = await Promise.all(VERSION_FEED_URLS.map(fetchFeedVersion));
+  return highestSemver([FALLBACK_VERSION, ...reported].join(' ')) ?? FALLBACK_VERSION;
+}
+
+async function fetchFeedVersion(url: string): Promise<string> {
   try {
-    const response = await request(VERSION_FEED_URL, {
+    const response = await request(url, {
       timeoutMs: 2500,
       headers: { 'user-agent': buildUserAgent(FALLBACK_VERSION) },
       proxyUrl: Config.upstreamProxyUrl(),
     });
-    const payload = await readBody(response.stream);
-    const discovered = highestSemver(payload);
-    if (discovered && compareSemver(discovered, FALLBACK_VERSION) > 0) {
-      return discovered;
-    }
+    return highestSemver(await readBody(response.stream)) ?? '';
   } catch (error) {
-    Logger.debug('Antigravity version feed unavailable, using fallback version', error);
+    Logger.debug(`Antigravity version feed ${url} unavailable`, error);
+    return '';
   }
-  return FALLBACK_VERSION;
 }
 
 function highestSemver(text: string): string | null {
