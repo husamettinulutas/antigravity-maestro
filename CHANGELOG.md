@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.7
+
+- **Requests are no longer turned away as coming from an old Antigravity.**
+  The endpoints now refuse clients that claim an outdated version, with
+  "This version of Antigravity is no longer supported". The extension took
+  its version from Antigravity's original update feed, which stopped at
+  2.0.6, and fell back to 2.0.3 when that feed could not be reached. It now
+  also reads the feed the Antigravity app polls today, uses the newest
+  version either one reports, and never goes below 2.29.0, the current
+  stable release. Thanks to @vanthomiy (#17).
+
 ## 1.3.6
 
 - **The models show up in the new Agents window.** VS Code turns off
