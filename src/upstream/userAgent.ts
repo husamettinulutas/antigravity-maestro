@@ -21,6 +21,20 @@ const VERSION_FEED_URLS = [
 ];
 const VERSION_REGEX = /\d+\.\d+\.\d+/g;
 
+/**
+ * The changelist of the Antigravity build this client claims to be.
+ *
+ * The endpoints gate the newest model families on the whole client signature,
+ * not just the version: a User-Agent without the `aidev_client` product tag
+ * and a `cl=` stamp is served the older catalogue and answers a generate call
+ * for Gemini 4 with "Requested entity was not found". Verified against a live
+ * Ultra account: without it the model list holds 23 models and no Gemini 4;
+ * with it, 29, including the Argon and Carbon tiers.
+ *
+ * It is calibrated by hand rather than discovered, because no feed reports it.
+ */
+const OFFICIAL_HUB_CL = '1008300195';
+
 let cachedUserAgent: string | undefined;
 let pending: Promise<string> | undefined;
 
@@ -29,7 +43,10 @@ let pending: Promise<string> | undefined;
  * so every upstream request carries this User-Agent.
  */
 export function buildUserAgent(version: string): string {
-  return `antigravity/${version} ${platformTag()}/${archTag()}`;
+  return (
+    `antigravity/hub/${version} (aidev_client; ` +
+    `os_type=${platformTag()}; arch=${archTag()}; cl=${OFFICIAL_HUB_CL})`
+  );
 }
 
 /** Resolve (and cache) the User-Agent for this session. */

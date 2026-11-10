@@ -38,7 +38,7 @@ async function resolveWith(reply: (url: string) => string | Error): Promise<stri
 }
 
 function claimed(userAgent: string): string {
-  return /^antigravity\/(\d+\.\d+\.\d+) /.exec(userAgent)?.[1] ?? '';
+  return /^antigravity\/hub\/(\d+\.\d+\.\d+) \(/.exec(userAgent)?.[1] ?? '';
 }
 
 test('user agent: the newest version any feed reports wins', async () => {
@@ -61,4 +61,28 @@ test('user agent: a stale feed never pulls the version below the floor', async (
 test('user agent: with every feed down the fallback is used', async () => {
   const userAgent = await resolveWith(() => new Error('offline'));
   assert.equal(claimed(userAgent), '2.29.0');
+});
+
+/**
+ * The newest model families are gated on the whole client signature. Served
+ * the plain `antigravity/<version> <os>/<arch>` string, the upstream withholds
+ * the Gemini 4 tiers from the model list and answers a generate call for one
+ * with "Requested entity was not found".
+ */
+test('user agent: carries the aidev_client product tag and a changelist', async () => {
+  const userAgent = await resolveWith(() => new Error('offline'));
+  assert.match(
+    userAgent,
+    /^antigravity\/hub\/2\.29\.0 \(aidev_client; os_type=\w+; arch=\w+; cl=\d+\)$/,
+  );
+});
+
+test('user agent: the version the client reports is the one it claims', async () => {
+  delete require.cache[require.resolve('../upstream/userAgent')];
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { buildUserAgent, currentVersion } = require('../upstream/userAgent');
+  // `currentVersion` feeds `x-client-version`, and reads it back out of the
+  // User-Agent — the changelist must not be mistaken for it.
+  assert.equal(currentVersion(), '2.29.0');
+  assert.match(buildUserAgent('3.4.1'), /^antigravity\/hub\/3\.4\.1 \(/);
 });

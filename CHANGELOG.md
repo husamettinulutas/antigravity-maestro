@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.8
+
+- **Gemini 4 Argon and Carbon now show up.** The upstream gates its newest
+  model families on the whole client signature, not just the version: asked
+  by a client identifying itself as `antigravity/<version> <os>/<arch>`, it
+  answered with a catalogue that held neither family, and a generate call
+  for one came back "Requested entity was not found". The User-Agent now
+  carries the product tag and build changelist the Antigravity app sends,
+  `antigravity/hub/<version> (aidev_client; os_type=…; arch=…; cl=…)`. On an
+  eligible plan the six Argon and Carbon tiers then arrive from the model
+  list like every other model — nothing about them is hard-coded here.
+  Thanks to @sapdfr625-tech (#16).
+
 ## 1.3.7
 
 - **Requests are no longer turned away as coming from an old Antigravity.**
