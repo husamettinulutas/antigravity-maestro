@@ -106,18 +106,22 @@ older than a week or a month, or everything.
 
 ## Models
 
-Model ids are passed through exactly as upstream reports them — nothing is renamed. Where a model
-exposes separate reasoning tiers, those are distinct ids upstream with different thinking budgets,
-so they appear as distinct models here:
+Model ids are passed through exactly as upstream reports them — nothing is renamed, and no model is
+hard-coded here. The list comes from each account's own quota response, so it reflects what Google
+actually serves that account. Where a model exposes separate reasoning tiers, those are distinct ids
+upstream with different thinking budgets, so they appear as distinct models here:
 
 ```
-gemini-3.1-pro-high      gemini-3.5-flash-high      claude-opus-4-6-thinking
-gemini-3.1-pro-low       gemini-3.5-flash-medium    claude-sonnet-4-6-thinking
-gemini-3-flash           gemini-3.5-flash-low       gpt-oss-120b-medium
+gemini-4-argon-high      gemini-4-carbon-high       claude-opus-5-5-high
+gemini-4-argon-medium    gemini-4-carbon-medium     claude-sonnet-5-5-high
+gemini-4-argon-low       gemini-4-carbon-low        gpt-oss-120b-medium
+gemini-3.8-flash-high    gemini-3.8-flash-tiered    gemini-3.1-flash-image
 ```
 
-The authoritative list comes from each account's own quota response, so it reflects what Google
-actually serves that account.
+Which of them an account is offered depends on its plan: the Gemini 4 families and Claude 5.5 arrive
+on Google AI Ultra, while a Pro account is served the generation below them. A model Google retires
+leaves the list on the next refresh, and a request for it is forwarded to the successor Google
+names.
 
 The `*-tiered` Gemini Flash models are the exception: one id whose effort each request chooses.
 Copilot's model picker offers a **Thinking Effort** control for them where VS Code supports it —
@@ -128,8 +132,8 @@ effort it runs at. Claude Code's ultracode reaches the model the same way: while
 is told to run substantive tasks as workflows, without being asked each time.
 
 Each model in Copilot's picker shows the size of its context window, because the windows differ by
-an order of magnitude — around 1M tokens for the Gemini models against 200K for the Claude ones.
-Switching a long conversation to a smaller window makes Copilot Chat compact it first ("Compacting
+an order of magnitude — around 1M tokens for the Gemini models against a few hundred thousand for
+the Claude ones. Switching a long conversation to a smaller window makes Copilot Chat compact it first ("Compacting
 conversation…"), and that summary is a model turn like any other: it is charged to the account.
 Starting a new chat for the new model avoids it.
 
@@ -144,6 +148,8 @@ integrations are wired up for you by **Use model** — the gateway is there for 
 | `POST /v1/messages` | Anthropic Messages (streaming + blocking) | Claude Code |
 | `POST /v1/responses` | OpenAI Responses | Codex |
 | `POST /v1/chat/completions` | OpenAI Chat Completions | generic clients |
+| `POST /v1/messages/count_tokens` | Anthropic token count | Claude Code |
+| `POST /v1/images/generations` | OpenAI Images | generic clients |
 | `GET /v1/models` | model list | both |
 | `GET /health` | liveness (unauthenticated) | you |
 
@@ -182,6 +188,9 @@ next account in the list, which may be the one another window is using. Set
 | `antigravityMaestro.gateway.autoStart` | `true` | Start the gateway with VS Code. |
 | `antigravityMaestro.rotation.strategy` | `highest-quota-first` | `manual`, `round-robin`, or `highest-quota-first`. |
 | `antigravityMaestro.rotation.cooldownMinutes` | `15` | Fallback cooldown after a rate limit. |
+| `antigravityMaestro.rotation.maxWaitSeconds` | `60` | How long a request may wait for a cooling-down account before it fails. |
+| `antigravityMaestro.maxConcurrentRequestsPerAccount` | `3` | Requests one account may have in flight at once. |
+| `antigravityMaestro.requestTimeoutSeconds` | `120` | Wait for an upstream response, or for the next part of a stream. |
 | `antigravityMaestro.quota.autoRefreshMinutes` | `10` | Background quota refresh (`0` disables it). |
 | `antigravityMaestro.upstreamProxyUrl` | `""` | HTTP(S) proxy for all Google traffic. |
 | `antigravityMaestro.oauth.clientId` / `.clientSecret` | `""` | Sign in with your own approved OAuth client. |
@@ -189,6 +198,8 @@ next account in the list, which may be the one another window is using. Set
 | `antigravityMaestro.claudeCode.settingsScope` | `user` | Write `~/.claude/settings.json` or the workspace's `.claude/settings.local.json`. |
 | `antigravityMaestro.claudeCode.smallFastModel` | `""` | Cheaper model for Claude Code's background tasks. |
 | `antigravityMaestro.codex.configPath` | `""` | Alternative `config.toml` path. |
+| `antigravityMaestro.reloadOnModelChange` | `prompt` | `prompt`, `auto` or `never`: Claude Code and Codex read their wiring once, at window start, so a model change lands on reload. |
+| `antigravityMaestro.logLevel` | `info` | `debug`, `info`, `warn` or `error` for the output channel. |
 
 Under `manual` rotation the active account never changes on its own. Under the other strategies it
 changes only when the account you picked cannot serve the request.
@@ -232,7 +243,7 @@ cp .env.example .env      # then fill in your OAuth client
 |---|---|
 | `npm run watch` | esbuild in watch mode; press F5 to launch the Extension Development Host. |
 | `npm run compile` | Type-check only. |
-| `npm test` | Protocol mapper tests. |
+| `npm test` | Type-check, then the test suite. |
 | `npm run build` | Production bundle. |
 | `npm run package` | Build a `.vsix`. |
 
